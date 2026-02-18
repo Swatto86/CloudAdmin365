@@ -1,0 +1,50 @@
+# ── Build output ───────────────────────────────────────────────────────────
+bin/
+obj/
+dist/
+
+# ── Visual Studio ──────────────────────────────────────────────────────────
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+.vscode/settings.json
+
+# ── .NET publish artefacts ─────────────────────────────────────────────────
+publish/
+*.deps.json
+*.runtimeconfig.json
+*.runtimeconfig.dev.json
+
+# ── NuGet ──────────────────────────────────────────────────────────────────
+*.nupkg
+*.snupkg
+project.lock.json
+project.assets.json
+packages/
+nuget.config
+
+# ── Application logs ───────────────────────────────────────────────────────
+logs/
+*.log
+*.log.old
+
+# ── OS artefacts ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Test results ──────────────────────────────────────────────────────────
+TestResults/
+coverage/
+*.trx
+*.coveragexml
+
+# ── Secrets (never commit) ────────────────────────────────────────────────
+appsettings.*.json
+secrets.json
+*.pfx
+*.p12
+*.key

@@ -258,22 +258,35 @@ Program.Main()
 
 ### Debug
 ```powershell
-cd "c:\Users\Steve Watson\ExchangeAnalyzer"
+cd "c:\Users\Steve Watson\CloudAdmin365"
 dotnet build
 dotnet run
 ```
 
-### Release (framework-dependent)
+### Release — single-file distribution (recommended)
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained false
+.\build-release.ps1                          # win-x64 (default)
+.\build-release.ps1 -Runtime win-arm64       # ARM devices
+.\build-release.ps1 -OpenFolder             # open dist\ in Explorer after build
 ```
-Output: `bin\Release\net8.0-windows\win-x64\publish\CloudAdmin365.exe`  
-Requires .NET 8.0 Runtime on target machine.
+Output: `dist\win-x64\CloudAdmin365.exe` (~40-60 MB, Brotli-compressed single file)  
+Also produces: `dist\win-x64\setup.bat`, `dist\win-x64\setup.ps1`, `dist\CloudAdmin365-win-x64.zip`  
+Requires **.NET 8 Desktop Runtime** on the target machine (checked by `setup.ps1`).
 
-### Standalone (self-contained, larger)
+Mechanism: `PublishSingleFile=true` + `EnableCompressionInSingleFile=true` bundles and
+compresses all DLLs inside the EXE. Files are extracted to a per-user temp cache on first
+launch — transparent to the user. No ps2exe or Base64 encoding.
+
+### Manual publish (loose files, framework-dependent)
 ```powershell
-dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
+dotnet publish -c Release -f net8.0-windows -r win-x64 --no-self-contained
 ```
+Output: `bin\Release\net8.0-windows\win-x64\publish\` (~90 MB, 325 loose files)  
+Distribute alongside `setup.bat` and `setup.ps1`.
+
+### DEPRECATED
+`create-embedded-setup.ps1` — replaced by `build-release.ps1`. The old Base64/ps2exe
+approach produced ~120 MB installers; the new approach produces ~40-60 MB.
 
 ---
 
@@ -324,12 +337,14 @@ All configuration is external to code:
 | A12 — Security | Tokens/PII never logged |
 | A16 — UI resilience | Nav items disabled when module unavailable |
 | A17 — Pre-flight validation | DependencyManager validates all preconditions before opening MainForm |
+| A18 — Automated release pipeline | `build-release.ps1`: publishes, compresses, assembles dist folder and ZIP |
 | B — Atlas | This document; updated with every structural change |
 
 ---
 
-**Last Updated**: Phase 4 complete  
-**Framework**: .NET 8.0-windows (framework-dependent deployment)  
+**Last Updated**: Phase 4 complete — build pipeline updated to single-file release  
+**Framework**: .NET 8.0-windows (framework-dependent, single-file publish)  
 **Namespace**: `CloudAdmin365`  
 **Project file**: `CloudAdmin365.csproj`  
+**Release script**: `build-release.ps1`  
 

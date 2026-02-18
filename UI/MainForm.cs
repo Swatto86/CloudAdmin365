@@ -146,15 +146,36 @@ public class MainForm : Form
 
     private Control BuildBody()
     {
+        // NOTE: SplitterDistance is NOT set in the initializer because the control
+        // has zero width at construction time. Setting it here would violate the
+        // constraint: Panel1MinSize <= SplitterDistance <= Width - Panel2MinSize,
+        // causing an InvalidOperationException. Instead we defer it to a single
+        // Layout event after the container has been sized by its parent.
         var split = new SplitContainer
         {
             Dock            = DockStyle.Fill,
-            SplitterDistance = 210,
             FixedPanel      = FixedPanel.Panel1,
             IsSplitterFixed = true,
             Panel1MinSize   = 180,
             Panel2MinSize   = 400
         };
+
+        // Defer SplitterDistance until the container has its real width.
+        void SetSplitterDistanceOnce(object? sender, LayoutEventArgs e)
+        {
+            split.Layout -= SetSplitterDistanceOnce;
+            if (split.Width > split.Panel1MinSize + split.Panel2MinSize)
+            {
+                try { split.SplitterDistance = 210; }
+                catch (InvalidOperationException)
+                {
+                    // Guard: if the container is still too narrow, clamp.
+                    AppLogger.WriteDebug(
+                        $"SplitContainer width={split.Width}: could not set SplitterDistance=210, using Panel1MinSize.");
+                }
+            }
+        }
+        split.Layout += SetSplitterDistanceOnce;
 
         // Left: navigation panel
         var navPanel = BuildNavPanel();

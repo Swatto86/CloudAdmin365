@@ -3,18 +3,25 @@ namespace CloudAdmin365.Utilities;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.Drawing.Text;
 using System.IO;
 using System.Windows.Forms;
 
 /// <summary>
 /// Icon generator for CloudAdmin365.
-/// Produces a cloud + cog icon representing cloud administration.
+/// Produces a cog/gear icon with "365" text in the centre — an agnostic
+/// representation of an Office 365 administration platform.
+/// The design intentionally avoids service-specific imagery (envelopes,
+/// mailboxes, etc.) so it remains appropriate as new PowerShell modules are
+/// added to provide Exchange, Teams, SharePoint, Security, and other features.
 /// </summary>
 public static class IconGenerator
 {
-    private static readonly Color IconBlue  = Color.FromArgb(0, 120, 212);   // Microsoft blue
-    private static readonly Color CloudWhite = Color.White;
-    private static readonly Color CogColor  = Color.FromArgb(200, 230, 255); // Pale blue cog
+    // ── Colour palette ────────────────────────────────────────────────────
+    private static readonly Color BgBlue      = Color.FromArgb(0, 120, 212);   // Microsoft blue
+    private static readonly Color CogWhite    = Color.White;
+    private static readonly Color TextColor   = Color.FromArgb(0, 120, 212);   // Blue text on white cog
+    private static readonly Color CogShadow   = Color.FromArgb(40, 0, 0, 0);  // Subtle depth
 
     /// <summary>
     /// Returns the icon embedded in the application executable.
@@ -32,14 +39,18 @@ public static class IconGenerator
                     return icon;
             }
         }
-        catch { }
+        catch
+        {
+            // Fallback to generated icon — logged below.
+        }
 
         return GenerateApplicationIcon();
     }
 
     /// <summary>
-    /// Generates the CloudAdmin365 application icon: a cloud with a gear overlay.
-    /// Returns a 32x32 icon suitable for window title bars.
+    /// Generates the CloudAdmin365 application icon: a white cog/gear with
+    /// bold "365" text centred inside, on a Microsoft-blue rounded-square
+    /// background. Returns a 32×32 icon suitable for window title bars.
     /// </summary>
     public static Icon GenerateApplicationIcon()
     {
@@ -49,28 +60,41 @@ public static class IconGenerator
         using (var g = Graphics.FromImage(bitmap))
         {
             g.Clear(Color.Transparent);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.SmoothingMode     = SmoothingMode.AntiAlias;
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-            // ── Background: rounded square in Microsoft blue ──────────────
-            using var bgBrush = new SolidBrush(IconBlue);
+            // ── 1. Background: rounded square in Microsoft blue ───────────
+            using var bgBrush = new SolidBrush(BgBlue);
             FillRoundedRectangle(g, bgBrush, 0, 0, size, size, 7);
 
-            // ── Cloud silhouette (white, upper area) ──────────────────────
-            using var cloudBrush = new SolidBrush(CloudWhite);
-            using var cloudPath  = BuildCloudPath(4, 5, 24, 16);
-            g.FillPath(cloudBrush, cloudPath);
+            // ── 2. Cog / gear (white, centred) ───────────────────────────
+            const float cx = 16f, cy = 16f;
+            const float outerR = 13.5f, innerR = 9.5f;
+            const int   teeth  = 8;
 
-            // ── Gear (pale blue, overlapping cloud bottom) ────────────────
-            using var cogBrush = new SolidBrush(CogColor);
-            DrawGear(g, cogBrush, cx: 16, cy: 21, outerR: 7f, innerR: 3.5f, teeth: 6);
+            // Subtle shadow offset for depth
+            using var shadowBrush = new SolidBrush(CogShadow);
+            DrawGear(g, shadowBrush, cx + 0.5f, cy + 0.5f, outerR, innerR, teeth);
+
+            using var cogBrush = new SolidBrush(CogWhite);
+            DrawGear(g, cogBrush, cx, cy, outerR, innerR, teeth);
+
+            // ── 3. "365" text centred inside the cog ──────────────────────
+            using var textBrush = new SolidBrush(TextColor);
+            using var textFont  = new Font("Segoe UI", 8.5f, FontStyle.Bold, GraphicsUnit.Pixel);
+
+            var textSize = g.MeasureString("365", textFont);
+            float tx = cx - textSize.Width  / 2f;
+            float ty = cy - textSize.Height / 2f;
+            g.DrawString("365", textFont, textBrush, tx, ty);
         }
 
         return Icon.FromHandle(bitmap.GetHicon());
     }
 
     /// <summary>
-    /// Generates a small 16x16 tab icon: cloud + gear.
+    /// Generates a small 16×16 tab icon: a cog with "365" text.
     /// </summary>
     public static Icon GenerateTabIcon()
     {
@@ -80,14 +104,24 @@ public static class IconGenerator
         using (var g = Graphics.FromImage(bitmap))
         {
             g.Clear(Color.Transparent);
-            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.SmoothingMode     = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
 
-            using var cloudBrush = new SolidBrush(IconBlue);
-            using var cloudPath  = BuildCloudPath(1, 2, 14, 8);
-            g.FillPath(cloudBrush, cloudPath);
+            const float cx = 8f, cy = 8f;
+            const float outerR = 7f, innerR = 4.8f;
+            const int   teeth  = 8;
 
-            using var cogBrush = new SolidBrush(Color.FromArgb(0, 80, 160));
-            DrawGear(g, cogBrush, cx: 8, cy: 11, outerR: 4f, innerR: 1.8f, teeth: 6);
+            using var cogBrush = new SolidBrush(BgBlue);
+            DrawGear(g, cogBrush, cx, cy, outerR, innerR, teeth);
+
+            // "365" text inside
+            using var textBrush = new SolidBrush(Color.White);
+            using var textFont  = new Font("Segoe UI", 5f, FontStyle.Bold, GraphicsUnit.Pixel);
+
+            var textSize = g.MeasureString("365", textFont);
+            float tx = cx - textSize.Width  / 2f;
+            float ty = cy - textSize.Height / 2f;
+            g.DrawString("365", textFont, textBrush, tx, ty);
         }
 
         return Icon.FromHandle(bitmap.GetHicon());
@@ -98,76 +132,44 @@ public static class IconGenerator
     // ──────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds a cloud GraphicsPath using three overlapping ellipses merged with a base rectangle.
+    /// Draws a gear/cog wheel centred at (<paramref name="cx"/>, <paramref name="cy"/>).
+    /// Uses a smooth star-polygon approach: alternate points sit on the outer and
+    /// inner radii to form a continuous, round-tipped gear outline.
     /// </summary>
-    private static GraphicsPath BuildCloudPath(float x, float y, float w, float h)
+    private static void DrawGear(Graphics g, Brush brush, float cx, float cy,
+                                 float outerR, float innerR, int teeth)
     {
-        var path = new GraphicsPath();
+        // Each tooth occupies two points (outer tip, inner valley).
+        int points = teeth * 2;
+        var pts = new PointF[points];
+        double angleStep = Math.PI * 2.0 / points;
 
-        float baseTop    = y + h * 0.52f;
-        float baseHeight = h - (baseTop - y);
-
-        // Three bumps (left, centre, right)
-        path.AddEllipse(x,              baseTop - h * 0.40f, w * 0.40f, h * 0.50f);
-        path.AddEllipse(x + w * 0.28f,  y,                   w * 0.44f, h * 0.60f);
-        path.AddEllipse(x + w * 0.58f,  baseTop - h * 0.30f, w * 0.40f, h * 0.46f);
-
-        // Filled base — rounds off the bottom of the cloud
-        path.AddRectangle(new RectangleF(x, baseTop, w, baseHeight));
-
-        return path;
-    }
-
-    /// <summary>
-    /// Draws a gear/cog wheel centred at (cx, cy).
-    /// </summary>
-    private static void DrawGear(Graphics g, Brush brush, float cx, float cy, float outerR, float innerR, int teeth)
-    {
-        var path = new GraphicsPath();
-
-        double step    = Math.PI * 2.0 / teeth;
-        float  toothW  = (float)(step * 0.40);
-        float  toothH  = outerR - innerR + 1.5f;
-
-        // Teeth: one small rectangle per tooth, rotated around the centre
-        for (int i = 0; i < teeth; i++)
+        for (int i = 0; i < points; i++)
         {
-            double angle = i * step - Math.PI / 2.0;
-
-            using var toothPath = new GraphicsPath();
-            toothPath.AddRectangle(new RectangleF(-toothW / 2f, -(innerR + toothH), toothW, toothH));
-
-            using var m = new Matrix();
-            m.RotateAt((float)(angle * 180.0 / Math.PI), PointF.Empty);
-            m.Translate(cx, cy, MatrixOrder.Append);
-            toothPath.Transform(m);
-
-            path.AddPath(toothPath, false);
+            // Start at -90° so the first tooth faces up.
+            double angle = i * angleStep - Math.PI / 2.0;
+            float r = (i % 2 == 0) ? outerR : innerR;
+            pts[i] = new PointF(
+                cx + (float)(r * Math.Cos(angle)),
+                cy + (float)(r * Math.Sin(angle)));
         }
 
-        // Ring body (annulus represented as filled circle; hole punched below)
-        path.AddEllipse(cx - innerR - 0.5f, cy - innerR - 0.5f, (innerR + 0.5f) * 2, (innerR + 0.5f) * 2);
-
+        using var path = new GraphicsPath();
+        path.AddPolygon(pts);
         g.FillPath(brush, path);
-
-        // Punch the centre hole with transparent composite
-        using var holeBrush = new SolidBrush(Color.FromArgb(0, 0, 0, 0));
-        var previous = g.CompositingMode;
-        g.CompositingMode = CompositingMode.SourceCopy;
-        g.FillEllipse(holeBrush, cx - innerR * 0.55f, cy - innerR * 0.55f, innerR * 1.1f, innerR * 1.1f);
-        g.CompositingMode = previous;
     }
 
     /// <summary>
     /// Fills a rounded rectangle.
     /// </summary>
-    private static void FillRoundedRectangle(Graphics g, Brush brush, float x, float y, float w, float h, float r)
+    private static void FillRoundedRectangle(Graphics g, Brush brush,
+                                             float x, float y, float w, float h, float r)
     {
         using var path = new GraphicsPath();
-        path.AddArc(x,          y,          r * 2, r * 2, 180, 90);
-        path.AddArc(x + w - r*2, y,         r * 2, r * 2, 270, 90);
-        path.AddArc(x + w - r*2, y + h - r*2, r * 2, r * 2, 0,   90);
-        path.AddArc(x,          y + h - r*2, r * 2, r * 2, 90,  90);
+        path.AddArc(x,            y,            r * 2, r * 2, 180, 90);
+        path.AddArc(x + w - r * 2, y,           r * 2, r * 2, 270, 90);
+        path.AddArc(x + w - r * 2, y + h - r * 2, r * 2, r * 2, 0,   90);
+        path.AddArc(x,            y + h - r * 2, r * 2, r * 2, 90,  90);
         path.CloseFigure();
         g.FillPath(brush, path);
     }

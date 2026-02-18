@@ -122,6 +122,10 @@ $publishArgs = @(
     "-r", $Runtime,
     "--no-self-contained",                      # keep framework-dependent (small EXE)
     "-p:PublishSingleFile=true",                # bundle all app DLLs into one EXE
+    "-p:IncludeAllContentForSelfExtract=true",  # extract all to disk on first run — required
+                                                # because PowerShell SDK reads Assembly.Location
+                                                # to find its engine base dir; in-memory loading
+                                                # returns "" and crashes PSSnapInReader
     "-p:DebugType=None",                        # strip .pdb from output
     "-p:DebugSymbols=false",
     "--nologo"

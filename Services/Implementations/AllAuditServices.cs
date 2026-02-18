@@ -25,7 +25,7 @@ public sealed class RoomPermissionsService : IRoomPermissionsService
 
     public string DisplayName => "Room Calendar Permissions";
     public string ServiceId => "room-permissions";
-    public string Category => "Rooms";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "Calendars.Read.All", "User.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 
@@ -138,7 +138,7 @@ public sealed class RoomBookingAuditService : IRoomBookingAuditService
 
     public string DisplayName => "Room Booking Audit";
     public string ServiceId => "room-booking";
-    public string Category => "Rooms";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "Calendars.Read.All", "AuditLog.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 
@@ -267,7 +267,7 @@ public sealed class CalendarDiagnosticService : ICalendarDiagnosticService
 
     public string DisplayName => "Calendar Diagnostic Logs";
     public string ServiceId => "calendar-diagnostic";
-    public string Category => "Calendar";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "AuditLog.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 
@@ -391,7 +391,7 @@ public sealed class MailboxPermissionsService : IMailboxPermissionsService
 
     public string DisplayName => "Mailbox Permissions";
     public string ServiceId => "mailbox-permissions";
-    public string Category => "Mailbox";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "Mail.Read.All", "User.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 
@@ -554,7 +554,7 @@ public sealed class MailForwardingAuditService : IMailForwardingAuditService
 
     public string DisplayName => "Mail Forwarding Audit";
     public string ServiceId => "mail-forwarding";
-    public string Category => "Mailbox";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "Mail.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 
@@ -684,7 +684,7 @@ public sealed class SharedMailboxService : ISharedMailboxService
 
     public string DisplayName => "Shared Mailbox Explorer";
     public string ServiceId => "shared-mailbox";
-    public string Category => "Mailbox";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "Mail.Read.All", "User.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 
@@ -896,7 +896,7 @@ public sealed class GroupExplorerService : IGroupExplorerService
 
     public string DisplayName => "Group Membership Explorer";
     public string ServiceId => "group-explorer";
-    public string Category => "Groups";
+    public string Category => "Exchange";
     public string[] RequiredScopes => new[] { "Group.Read.All" };
     public string[] RequiredPowerShellModules => ["ExchangeOnlineManagement"];
 

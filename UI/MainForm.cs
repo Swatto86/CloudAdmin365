@@ -23,8 +23,11 @@ public class MainForm : Form
     private static readonly Font  NavItemFont     = new("Segoe UI", 9f);
 
     // ── Module category display order ─────────────────────────────────────
+    // Categories align with the PowerShell module that owns them.
+    // Future modules (SharePoint, Azure, Security) get their own section
+    // when the corresponding service and PS module are registered.
     private static readonly string[] CategoryOrder =
-        ["Rooms", "Exchange", "Mailboxes", "Groups", "Teams", "SharePoint", "Security"];
+        ["Exchange", "Teams", "SharePoint", "Azure", "Security"];
 
     private readonly IAuthService _authService;
     private readonly IAuditServiceProvider _auditProvider;
@@ -59,7 +62,7 @@ public class MainForm : Form
         AutoScaleMode   = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96, 96);
         Font            = AppTheme.DefaultFont;
-        Icon            = IconGenerator.GenerateApplicationIcon();
+        Icon            = IconGenerator.GetAppIcon();
         FormClosing    += MainForm_FormClosing;
         Shown          += MainForm_Shown;
     }

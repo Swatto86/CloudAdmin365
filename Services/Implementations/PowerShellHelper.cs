@@ -72,7 +72,12 @@ public sealed class PowerShellHelper : IDisposable
                 return;
             }
 
-            var initialState = InitialSessionState.CreateDefault();
+            // CreateDefault2() is used instead of CreateDefault() because CreateDefault()
+            // calls PSSnapInReader.ReadEnginePSSnapIns() which reads an ApplicationBase registry
+            // path that resolves to null when running as a PublishSingleFile bundle.
+            // CreateDefault2() is the correct choice for SDK-hosted/embedded runspaces — it
+            // loads built-in cmdlets without touching the snap-in registry.
+            var initialState = InitialSessionState.CreateDefault2();
             if (_allowExecutionPolicyBypass)
             {
                 initialState.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;

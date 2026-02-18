@@ -269,13 +269,13 @@ dotnet run
 .\build-release.ps1 -Runtime win-arm64       # ARM devices
 .\build-release.ps1 -OpenFolder             # open dist\ in Explorer after build
 ```
-Output: `dist\win-x64\CloudAdmin365.exe` (~40-60 MB, Brotli-compressed single file)  
-Also produces: `dist\win-x64\setup.bat`, `dist\win-x64\setup.ps1`, `dist\CloudAdmin365-win-x64.zip`  
+Output: `dist\win-x64\CloudAdmin365.exe` (~90 MB single file — same content as loose publish, one file)  
+Also produces: `dist\win-x64\setup.bat`, `dist\win-x64\setup.ps1`, `dist\CloudAdmin365-win-x64.zip` (~40-55 MB, Optimal-compressed)  
 Requires **.NET 8 Desktop Runtime** on the target machine (checked by `setup.ps1`).
 
-Mechanism: `PublishSingleFile=true` + `EnableCompressionInSingleFile=true` bundles and
-compresses all DLLs inside the EXE. Files are extracted to a per-user temp cache on first
-launch — transparent to the user. No ps2exe or Base64 encoding.
+Mechanism: `PublishSingleFile=true` bundles all app DLLs into the EXE. Note:
+`EnableCompressionInSingleFile` is only supported for self-contained apps, so the EXE
+is not Brotli-compressed internally — the ZIP provides compression for distribution.
 
 ### Manual publish (loose files, framework-dependent)
 ```powershell
@@ -286,7 +286,8 @@ Distribute alongside `setup.bat` and `setup.ps1`.
 
 ### DEPRECATED
 `create-embedded-setup.ps1` — replaced by `build-release.ps1`. The old Base64/ps2exe
-approach produced ~120 MB installers; the new approach produces ~40-60 MB.
+approach produced ~120 MB installers; `build-release.ps1` produces a ~90 MB single-file
+EXE and a ~40-55 MB ZIP for distribution.
 
 ---
 

@@ -7,12 +7,14 @@
     Produces a single-file, framework-dependent release EXE using the standard
     .NET PublishSingleFile mechanism with Brotli compression.
 
-    Output is one CloudAdmin365.exe bundling all dependencies (~40-60 MB
-    compressed vs ~90 MB uncompressed loose files), plus setup.bat and
+    Output is one CloudAdmin365.exe bundling all app dependencies (~90 MB,
+    same as the loose publish folder but in a single file), plus setup.bat and
     setup.ps1 to check the .NET 8 Desktop Runtime on the target machine.
 
-    The EXE extracts itself to a per-user temp cache on first launch
-    (transparent to the user). No ps2exe, no Base64 encoding.
+    Note: EnableCompressionInSingleFile (Brotli) is only available for
+    self-contained apps. Framework-dependent single-file bundles the DLLs
+    without an extra compression pass. The ZIP produced by this script
+    applies Optimal compression on top for sharing (~40-55 MB zip).
 
     Requirements:
       - .NET SDK 8.0+  (dotnet CLI in PATH)
@@ -119,8 +121,7 @@ $publishArgs = @(
     "-f", "net8.0-windows",
     "-r", $Runtime,
     "--no-self-contained",                      # keep framework-dependent (small EXE)
-    "-p:PublishSingleFile=true",                # bundle all DLLs into the EXE
-    "-p:EnableCompressionInSingleFile=true",    # Brotli compress bundled files (~40-60 MB)
+    "-p:PublishSingleFile=true",                # bundle all app DLLs into one EXE
     "-p:DebugType=None",                        # strip .pdb from output
     "-p:DebugSymbols=false",
     "--nologo"

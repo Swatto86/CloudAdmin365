@@ -33,6 +33,7 @@ public class MainForm : Form
     private Panel _contentPanel = null!;
     private Label _connectionStatus = null!;
     private Panel? _activeNavItem;
+    private SplitContainer _splitContainer = null!;
     private readonly Dictionary<string, UserControl> _moduleCache = new();
 
     public MainForm(IAuthService authService, IAuditServiceProvider auditProvider,
@@ -58,8 +59,9 @@ public class MainForm : Form
         AutoScaleMode   = AutoScaleMode.Dpi;
         AutoScaleDimensions = new SizeF(96, 96);
         Font            = AppTheme.DefaultFont;
-        Icon            = IconGenerator.GetAppIcon();
+        Icon            = IconGenerator.GenerateApplicationIcon();
         FormClosing    += MainForm_FormClosing;
+        Shown          += MainForm_Shown;
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -146,41 +148,23 @@ public class MainForm : Form
 
     private Control BuildBody()
     {
-        // NOTE: SplitterDistance is NOT set in the initializer because the control
-        // has zero width at construction time. Setting it here would violate the
-        // constraint: Panel1MinSize <= SplitterDistance <= Width - Panel2MinSize,
-        // causing an InvalidOperationException. Instead we defer it to a single
-        // Layout event after the container has been sized by its parent.
-        var split = new SplitContainer
+        // NOTE: Panel1MinSize, Panel2MinSize, and SplitterDistance are NOT set
+        // here because the control has zero width during construction. WinForms
+        // validates: Panel1MinSize <= SplitterDistance <= Width - Panel2MinSize.
+        // When Width == 0 that constraint cannot be satisfied, causing an
+        // InvalidOperationException. All three properties are deferred to the
+        // Shown event (MainForm_Shown) when the form has its real dimensions.
+        _splitContainer = new SplitContainer
         {
             Dock            = DockStyle.Fill,
             FixedPanel      = FixedPanel.Panel1,
-            IsSplitterFixed = true,
-            Panel1MinSize   = 180,
-            Panel2MinSize   = 400
+            IsSplitterFixed = true
         };
-
-        // Defer SplitterDistance until the container has its real width.
-        void SetSplitterDistanceOnce(object? sender, LayoutEventArgs e)
-        {
-            split.Layout -= SetSplitterDistanceOnce;
-            if (split.Width > split.Panel1MinSize + split.Panel2MinSize)
-            {
-                try { split.SplitterDistance = 210; }
-                catch (InvalidOperationException)
-                {
-                    // Guard: if the container is still too narrow, clamp.
-                    AppLogger.WriteDebug(
-                        $"SplitContainer width={split.Width}: could not set SplitterDistance=210, using Panel1MinSize.");
-                }
-            }
-        }
-        split.Layout += SetSplitterDistanceOnce;
 
         // Left: navigation panel
         var navPanel = BuildNavPanel();
-        split.Panel1.Controls.Add(navPanel);
-        split.Panel1.BackColor = NavBg;
+        _splitContainer.Panel1.Controls.Add(navPanel);
+        _splitContainer.Panel1.BackColor = NavBg;
 
         // Right: content area (swapped when nav item is selected)
         _contentPanel = new Panel
@@ -189,9 +173,9 @@ public class MainForm : Form
             BackColor = Color.FromArgb(248, 250, 252),
             Padding   = new Padding(0)
         };
-        split.Panel2.Controls.Add(_contentPanel);
+        _splitContainer.Panel2.Controls.Add(_contentPanel);
 
-        return split;
+        return _splitContainer;
     }
 
     // ── Left navigation panel ─────────────────────────────────────────────
@@ -461,6 +445,26 @@ public class MainForm : Form
 
         await _authService.LogoutAsync();
         Close();
+    }
+
+    /// <summary>
+    /// Configures the SplitContainer once the form is fully rendered and sized.
+    /// This avoids the WinForms constraint violation that occurs when setting
+    /// Panel1MinSize / Panel2MinSize / SplitterDistance on a zero-width control.
+    /// </summary>
+    private void MainForm_Shown(object? sender, EventArgs e)
+    {
+        try
+        {
+            _splitContainer.Panel1MinSize   = 180;
+            _splitContainer.Panel2MinSize   = 400;
+            _splitContainer.SplitterDistance = 210;
+        }
+        catch (InvalidOperationException ex)
+        {
+            AppLogger.WriteDebug(
+                $"SplitContainer (width={_splitContainer.Width}): could not configure splitter — {ex.Message}");
+        }
     }
 
     private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)

@@ -24,28 +24,11 @@ public static class IconGenerator
     private static readonly Color CogShadow   = Color.FromArgb(40, 0, 0, 0);  // Subtle depth
 
     /// <summary>
-    /// Returns the icon embedded in the application executable.
-    /// Falls back to generating one programmatically if not found.
+    /// Returns the application icon. Since CloudAdmin365 does not embed an .ico
+    /// resource (the icon is generated programmatically), this always delegates
+    /// to <see cref="GenerateApplicationIcon"/>.
     /// </summary>
-    public static Icon GetAppIcon()
-    {
-        try
-        {
-            var exePath = Application.ExecutablePath;
-            if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
-            {
-                var icon = Icon.ExtractAssociatedIcon(exePath);
-                if (icon != null)
-                    return icon;
-            }
-        }
-        catch
-        {
-            // Fallback to generated icon — logged below.
-        }
-
-        return GenerateApplicationIcon();
-    }
+    public static Icon GetAppIcon() => GenerateApplicationIcon();
 
     /// <summary>
     /// Generates the CloudAdmin365 application icon: a white cog/gear with

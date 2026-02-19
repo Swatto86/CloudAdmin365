@@ -499,27 +499,22 @@ public class GroupExplorerTab : AuditTabBase
 }
 
 /// <summary>
-/// Tab for Microsoft Teams exploration: list teams and drill into membership.
-/// Split layout: teams on top, members on bottom (drill-down on selection).
+/// Tab for Azure AD user management: browse and filter users by name.
 /// </summary>
-public class TeamsExplorerTab : AuditTabBase
+public class AzureADUsersTab : AuditTabBase
 {
-    private readonly ITeamsExplorerService _service;
+    private readonly IAzureADService _service;
     private TextBox? _filterInput;
-    private DataGridView _membersGrid = null!;
-    private Label _membersLabel = null!;
-    private string? _selectedGroupId;
-    private string? _selectedTeamName;
+    private CheckBox? _includeGuestsCheckbox;
 
-    public TeamsExplorerTab(ITeamsExplorerService service)
-        : base("Teams Explorer",
-               ["Team Name", "Visibility", "Archived", "Description"],
-               [35, 15, 10, 40])
+    public AzureADUsersTab(IAzureADService service)
+        : base("Azure AD — Users",
+               ["Display Name", "UPN", "User Type", "Enabled", "Job Title", "Department"],
+               [25, 30, 10, 8, 15, 12])
     {
         ArgumentNullException.ThrowIfNull(service);
         _service = service;
         SetupInputPanel();
-        AddMembersSection();
     }
 
     protected override void SetupInputPanel()
@@ -536,9 +531,19 @@ public class TeamsExplorerTab : AuditTabBase
             Location    = new Point(115, 7),
             Size        = new Size(280, 22),
             Font        = AppTheme.DefaultFont,
-            PlaceholderText = "(leave blank to list all)"
+            PlaceholderText = "(leave blank for all users)"
         };
-        InputPanel.Controls.AddRange(new Control[] { lblFilter, _filterInput });
+
+        _includeGuestsCheckbox = new CheckBox
+        {
+            Text     = "Include Guest Users",
+            Location = new Point(410, 8),
+            AutoSize = true,
+            Checked  = true,
+            Font     = AppTheme.DefaultFont
+        };
+
+        InputPanel.Controls.AddRange(new Control[] { lblFilter, _filterInput, _includeGuestsCheckbox });
 
         var lblDesc = new Label
         {
@@ -552,74 +557,8 @@ public class TeamsExplorerTab : AuditTabBase
         InputPanel.Controls.Add(lblDesc);
     }
 
-    /// <summary>
-    /// Adds a members DataGridView below the main results grid, plus a Get Members button.
-    /// Layout is extended by injecting controls after the base class finishes.
-    /// </summary>
-    private void AddMembersSection()
-    {
-        // The base TableLayoutPanel sits in Controls[0] — add two more rows after it.
-        var baseLayout = Controls.OfType<TableLayoutPanel>().First();
-        baseLayout.RowCount = 6;
-
-        // Row 4: separator label + Get Members button
-        baseLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        var memberBar = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(240, 244, 250) };
-
-        _membersLabel = new Label
-        {
-            Text      = "Team Members",
-            Location  = new Point(5, 8),
-            AutoSize  = true,
-            Font      = AppTheme.BoldFont,
-            ForeColor = AppTheme.ThemeBlue
-        };
-        memberBar.Controls.Add(_membersLabel);
-
-        var btnMembers = new Button
-        {
-            Text      = "Get Members for Selected Team",
-            Location  = new Point(160, 5),
-            Size      = new Size(220, 26),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = AppTheme.ThemeBlue,
-            ForeColor = Color.White,
-            Font      = AppTheme.DefaultFont,
-            Cursor    = Cursors.Hand
-        };
-        btnMembers.Click += async (_, _) => await LoadMembersAsync();
-        memberBar.Controls.Add(btnMembers);
-        baseLayout.Controls.Add(memberBar, 0, 4);
-
-        // Row 5: members grid
-        baseLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 180));
-        _membersGrid = UiHelpers.CreateThemedDataGrid(
-            ["Display Name", "UPN / Email", "Role"],
-            [30, 45, 25]);
-        baseLayout.Controls.Add(_membersGrid, 0, 5);
-
-        // Wire up teams grid row selection → remember selected groupId
-        ResultsGrid.SelectionChanged += OnTeamsGridSelectionChanged;
-    }
-
-    private void OnTeamsGridSelectionChanged(object? sender, EventArgs e)
-    {
-        if (ResultsGrid.SelectedRows.Count == 0)
-        {
-            _selectedGroupId  = null;
-            _selectedTeamName = null;
-            return;
-        }
-
-        var row = ResultsGrid.SelectedRows[0];
-        _selectedTeamName = row.Cells[0].Value?.ToString();
-        _selectedGroupId  = row.Tag?.ToString();   // GroupId stored in row Tag
-    }
-
     protected override async Task RunAuditAsync(CancellationToken cancellationToken)
     {
-        _membersGrid.Rows.Clear();
-        _membersLabel.Text = "Team Members";
         UpdateProgress(0, 1);
 
         try
@@ -631,24 +570,20 @@ public class TeamsExplorerTab : AuditTabBase
                 UpdateProgress(p.Current, p.Total);
             });
 
-            var result = await _service.GetTeamsAsync(
+            var result = await _service.GetUsersAsync(
                 string.IsNullOrWhiteSpace(_filterInput?.Text) ? null : _filterInput.Text,
+                _includeGuestsCheckbox?.Checked ?? true,
                 progress,
                 cancellationToken);
 
             if (!string.IsNullOrEmpty(result.Error))
             {
                 UpdateStatus($"Error: {result.Error}", AppTheme.ThemeRed);
-                MessageBox.Show(
-                    result.Error,
-                    "Teams Explorer Error",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
                 return;
             }
 
             RenderResults(result);
-            UpdateStatus($"Complete: {result.Teams.Count} team(s) found.", Color.FromArgb(0, 100, 0));
+            UpdateStatus($"Complete: {result.Users.Count} user(s) found.", Color.FromArgb(0, 100, 0));
             UpdateProgress(1, 1);
             EnableExport();
         }
@@ -664,64 +599,126 @@ public class TeamsExplorerTab : AuditTabBase
 
     protected override void RenderResults(object? data)
     {
-        if (data is not TeamsListResult result)
+        if (data is not AzureADUsersResult result)
             return;
 
         ResultsGrid.Rows.Clear();
-        foreach (var team in result.Teams)
+        foreach (var user in result.Users)
         {
-            var row = new DataGridViewRow();
-            row.CreateCells(ResultsGrid,
-                team.DisplayName,
-                team.Visibility ?? "Unknown",
-                team.IsArchived ? "Yes" : "No",
-                team.Description ?? string.Empty);
-            row.Tag = team.GroupId;   // Store GroupId for member lookup
-            ResultsGrid.Rows.Add(row);
+            ResultsGrid.Rows.Add(
+                user.DisplayName,
+                user.UserPrincipalName,
+                user.UserType,
+                user.AccountEnabled ? "Yes" : "No",
+                user.JobTitle ?? string.Empty,
+                user.Department ?? string.Empty);
         }
     }
+}
 
-    private async Task LoadMembersAsync()
+/// <summary>
+/// Tab for Intune device management: browse and filter managed devices.
+/// </summary>
+public class IntuneDevicesTab : AuditTabBase
+{
+    private readonly IIntuneService _service;
+    private TextBox? _filterInput;
+
+    public IntuneDevicesTab(IIntuneService service)
+        : base("Intune — Devices",
+               ["Device Name", "OS", "OS Version", "Compliance", "Last Sync", "User"],
+               [25, 12, 12, 12, 20, 19])
     {
-        if (string.IsNullOrWhiteSpace(_selectedGroupId))
-        {
-            UpdateStatus("Select a team from the list first.", AppTheme.ThemeOrange);
-            return;
-        }
+        ArgumentNullException.ThrowIfNull(service);
+        _service = service;
+        SetupInputPanel();
+    }
 
-        _membersGrid.Rows.Clear();
-        _membersLabel.Text = $"Members of: {_selectedTeamName}";
-        UpdateStatus("Fetching team members...", AppTheme.ThemeDimGray);
+    protected override void SetupInputPanel()
+    {
+        var lblFilter = new Label
+        {
+            Text     = "Filter by Device Name:",
+            Location = new Point(5, 10),
+            AutoSize = true,
+            Font     = AppTheme.DefaultFont
+        };
+        _filterInput = new TextBox
+        {
+            Location    = new Point(160, 7),
+            Size        = new Size(280, 22),
+            Font        = AppTheme.DefaultFont,
+            PlaceholderText = "(leave blank for all devices)"
+        };
+
+        InputPanel.Controls.AddRange(new Control[] { lblFilter, _filterInput });
+
+        var lblDesc = new Label
+        {
+            Text         = _service.GetDescription(),
+            Location     = new Point(5, 36),
+            MaximumSize  = new Size(1000, 0),
+            AutoSize     = true,
+            ForeColor    = Color.Gray,
+            Font         = new Font("Segoe UI", 8)
+        };
+        InputPanel.Controls.Add(lblDesc);
+    }
+
+    protected override async Task RunAuditAsync(CancellationToken cancellationToken)
+    {
+        UpdateProgress(0, 1);
 
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
             var progress = new Progress<AuditProgress>(p =>
             {
                 if (p.Status != null)
                     UpdateStatus(p.Status, AppTheme.ThemeDimGray);
+                UpdateProgress(p.Current, p.Total);
             });
 
-            var result = await _service.GetTeamMembersAsync(_selectedGroupId, progress, cts.Token);
+            var result = await _service.GetManagedDevicesAsync(
+                string.IsNullOrWhiteSpace(_filterInput?.Text) ? null : _filterInput.Text,
+                progress,
+                cancellationToken);
 
             if (!string.IsNullOrEmpty(result.Error))
             {
-                UpdateStatus($"Members error: {result.Error}", AppTheme.ThemeRed);
+                UpdateStatus($"Error: {result.Error}", AppTheme.ThemeRed);
                 return;
             }
 
-            foreach (var member in result.Members)
-            {
-                _membersGrid.Rows.Add(member.DisplayName, member.UserPrincipalName, member.Role);
-            }
-
-            UpdateStatus(
-                $"Complete: {result.Members.Count} member(s) in {_selectedTeamName}.",
-                Color.FromArgb(0, 100, 0));
+            RenderResults(result);
+            UpdateStatus($"Complete: {result.Devices.Count} managed device(s) found.", Color.FromArgb(0, 100, 0));
+            UpdateProgress(1, 1);
+            EnableExport();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            UpdateStatus($"Members error: {ex.Message}", AppTheme.ThemeRed);
+            UpdateStatus($"Error: {ex.Message}", AppTheme.ThemeRed);
+        }
+    }
+
+    protected override void RenderResults(object? data)
+    {
+        if (data is not IntuneDevicesResult result)
+            return;
+
+        ResultsGrid.Rows.Clear();
+        foreach (var device in result.Devices)
+        {
+            ResultsGrid.Rows.Add(
+                device.DeviceName,
+                device.OperatingSystem,
+                device.OSVersion,
+                device.ComplianceState,
+                device.LastSyncDateTime?.ToString("g") ?? "Never",
+                device.UserPrincipalName ?? "(Unassigned)");
         }
     }
 }

@@ -63,8 +63,12 @@ public static class ModuleRegistry
             svc => new GroupExplorerTab((IGroupExplorerService)svc)),
 
         new(
-            (ps, auth) => new TeamsExplorerService(ps, auth),
-            svc => new TeamsExplorerTab((ITeamsExplorerService)svc)),
+            (ps, auth) => new AzureADService(ps),
+            svc => new AzureADUsersTab((IAzureADService)svc)),
+
+        new(
+            (ps, auth) => new IntuneService(ps),
+            svc => new IntuneDevicesTab((IIntuneService)svc)),
     ];
     // ADD NEW MODULES HERE ↑ ───────────────────────────────────────────────
 

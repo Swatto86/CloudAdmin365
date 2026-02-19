@@ -1268,85 +1268,86 @@ internal static class AuditValidation
 }
 
 /// <summary>
-/// Lists Microsoft Teams and their members via the MicrosoftTeams PowerShell module.
-/// Establishes its own Teams connection (separate from Exchange Online).
+/// Azure AD/Entra ID user management via Microsoft Graph PowerShell.
+/// Uses the existing Microsoft Graph authentication session.
 /// </summary>
-public sealed class TeamsExplorerService : ITeamsExplorerService
+public sealed class AzureADService : IAzureADService
 {
     private const int MaxFilterLength = 200;
-    private const int MaxTeamResults  = 1000;
-    private const string TeamsScope   = "https://api.spaces.skype.com/.default";
+    private const int MaxUserResults  = 5000;
 
     private readonly PowerShellHelper _powerShell;
-    private readonly IAuthService _authService;
     private readonly SemaphoreSlim _connectMutex = new(1, 1);
-    private bool _teamsConnected;
+    private bool _graphConnected;
 
-    public string DisplayName   => "Teams Explorer";
-    public string ServiceId     => "teams-explorer";
-    public string Category      => "Teams";
-    public string[] RequiredScopes => ["Team.ReadBasic.All", "TeamMember.Read.All"];
-    public string[] RequiredPowerShellModules => ["MicrosoftTeams"];
+    public string DisplayName   => "Azure AD Users";
+    public string ServiceId     => "azuread-users";
+    public string Category      => "Azure AD";
+    public string[] RequiredScopes => ["User.Read.All", "Directory.Read.All"];
+    public string[] RequiredPowerShellModules => [];  // Uses Graph connection from main auth
 
-    public TeamsExplorerService(PowerShellHelper powerShell, IAuthService authService)
+    public AzureADService(PowerShellHelper powerShell)
     {
         _powerShell = powerShell ?? throw new ArgumentNullException(nameof(powerShell));
-        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     }
 
     public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
         => AuditValidation.TryInitializeAsync(_powerShell, cancellationToken);
 
     public string GetDescription()
-        => "Browse Microsoft Teams: list all teams and inspect membership and ownership. Requires MicrosoftTeams module.";
+        => "Browse Azure AD users: list all users with account status,job title, and user type. Filterable by display name.";
 
-    /// <summary>
-    /// Returns all (or filtered) Teams in the tenant.
-    /// </summary>
-    public async Task<TeamsListResult> GetTeamsAsync(
+    public async Task<AzureADUsersResult> GetUsersAsync(
         string? filterByName = null,
+        bool includeGuestUsers = true,
         IProgress<AuditProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (filterByName != null && filterByName.Length > MaxFilterLength)
-            return new TeamsListResult { Error = $"Filter exceeds maximum length ({MaxFilterLength})." };
+            return new AzureADUsersResult { Error = $"Filter exceeds maximum length ({MaxFilterLength})." };
 
         try
         {
-            progress?.Report(new AuditProgress { Current = 0, Total = 3, Status = "Connecting to Microsoft Teams..." });
-            await EnsureTeamsConnectedAsync(cancellationToken).ConfigureAwait(false);
+            progress?.Report(new AuditProgress { Current = 0, Total = 2, Status = "Connecting to Microsoft Graph..." });
+            await EnsureGraphConnectedAsync(cancellationToken).ConfigureAwait(false);
 
-            progress?.Report(new AuditProgress { Current = 1, Total = 3, Status = "Fetching teams list..." });
+            progress?.Report(new AuditProgress { Current = 1, Total = 2, Status = "Fetching users from Azure AD..." });
 
-            var parameters = new Dictionary<string, object?>();
+            var filter = string.Empty;
             if (!string.IsNullOrWhiteSpace(filterByName))
-                parameters["DisplayName"] = AuditValidation.EscapeFilterValue(filterByName);
+            {
+                filter = $"startsWith(displayName,'{AuditValidation.EscapeFilterValue(filterByName)}')";
+                if (!includeGuestUsers)
+                    filter += " and userType eq 'Member'";
+            }
+            else if (!includeGuestUsers)
+            {
+                filter = "userType eq 'Member'";
+            }
+
+            var parameters = new Dictionary<string, object?>
+            {
+                ["All"] = null,
+                ["Property"] = new[] { "Id", "DisplayName", "UserPrincipalName", "UserType", "AccountEnabled", "JobTitle", "Department", "Mail" }
+            };
+            if (!string.IsNullOrEmpty(filter))
+                parameters["Filter"] = filter;
 
             var results = await _powerShell.ExecuteRawCommandAsync(
-                "Get-Team",
+                "Get-MgUser",
                 parameters,
                 cancellationToken).ConfigureAwait(false);
 
-            progress?.Report(new AuditProgress { Current = 2, Total = 3, Status = "Processing results..." });
-
-            var teams = results
-                .Take(MaxTeamResults)
-                .Select(r => new TeamInfo
-                {
-                    DisplayName = GetPSObjectProperty(r, "DisplayName") ?? "(No Name)",
-                    GroupId     = GetPSObjectProperty(r, "GroupId")     ?? string.Empty,
-                    Description = GetPSObjectProperty(r, "Description"),
-                    Visibility  = GetPSObjectProperty(r, "Visibility"),
-                    IsArchived  = string.Equals(
-                        GetPSObjectProperty(r, "Archived"), "True",
-                        StringComparison.OrdinalIgnoreCase)
-                })
+            var users = results
+                .Take(MaxUserResults)
+                .Select(PSObjectToAzureADUser)
+                .Where(u => u != null)
+                .Cast<AzureADUser>()
+                .OrderBy(u => u.DisplayName)
                 .ToList();
 
-            progress?.Report(new AuditProgress { Current = 3, Total = 3, Status = $"{teams.Count} team(s) found." });
-
-            AppLogger.WriteInfo($"TeamsExplorerService: found {teams.Count} team(s).");
-            return new TeamsListResult { Teams = teams };
+            AppLogger.WriteInfo($"AzureADService: found {users.Count} user(s).");
+            return new AzureADUsersResult { Users = users };
         }
         catch (OperationCanceledException)
         {
@@ -1354,133 +1355,30 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
         }
         catch (Exception ex)
         {
-            var errorMsg = ex.Message;
-            if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
-            {
-                errorMsg = psEx.CommandOutput;
-                AppLogger.WriteError($"TeamsExplorerService.GetTeamsAsync failed. PowerShell errors:\n{psEx.CommandOutput}", ex);
-            }
-            else
-            {
-                AppLogger.WriteError("TeamsExplorerService.GetTeamsAsync failed.", ex);
-            }
-            return new TeamsListResult { Error = errorMsg };
+            AppLogger.WriteError("AzureADService.GetUsersAsync failed.", ex);
+            return new AzureADUsersResult { Error = ex.Message };
         }
     }
 
-    /// <summary>
-    /// Returns all members and their roles for a specific Team.
-    /// </summary>
-    public async Task<TeamMembersResult> GetTeamMembersAsync(
-        string groupId,
-        IProgress<AuditProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+    private async Task EnsureGraphConnectedAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(groupId))
-            return new TeamMembersResult { TeamName = string.Empty, Error = "Group ID is required." };
-
-        try
-        {
-            progress?.Report(new AuditProgress { Current = 0, Total = 2, Status = "Fetching team members..." });
-            await EnsureTeamsConnectedAsync(cancellationToken).ConfigureAwait(false);
-
-            var results = await _powerShell.ExecuteRawCommandAsync(
-                "Get-TeamUser",
-                new Dictionary<string, object?> { ["GroupId"] = groupId },
-                cancellationToken).ConfigureAwait(false);
-
-            var members = results
-                .Select(r => new TeamMemberEntry
-                {
-                    DisplayName       = GetPSObjectProperty(r, "Name") ?? GetPSObjectProperty(r, "DisplayName") ?? "(Unknown)",
-                    UserPrincipalName = GetPSObjectProperty(r, "User") ?? GetPSObjectProperty(r, "UserPrincipalName") ?? string.Empty,
-                    Role              = GetPSObjectProperty(r, "Role") ?? "Member"
-                })
-                .OrderBy(m => m.Role)   // Owners first
-                .ThenBy(m => m.DisplayName)
-                .ToList();
-
-            progress?.Report(new AuditProgress { Current = 2, Total = 2, Status = $"{members.Count} member(s) found." });
-
-            AppLogger.WriteInfo($"TeamsExplorerService: found {members.Count} member(s) in group {groupId}.");
-            return new TeamMembersResult { TeamName = groupId, Members = members };
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            var errorMsg = ex.Message;
-            if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
-            {
-                errorMsg = psEx.CommandOutput;
-                AppLogger.WriteError($"TeamsExplorerService.GetTeamMembersAsync failed. PowerShell errors:\n{psEx.CommandOutput}", ex);
-            }
-            else
-            {
-                AppLogger.WriteError("TeamsExplorerService.GetTeamMembersAsync failed.", ex);
-            }
-            return new TeamMembersResult { TeamName = groupId, Error = errorMsg };
-        }
-    }
-
-    /// <summary>
-    /// Imports MicrosoftTeams module and connects with the current user's credentials.
-    /// Called lazily before the first Teams command; idempotent.
-    /// </summary>
-    private async Task EnsureTeamsConnectedAsync(CancellationToken cancellationToken)
-    {
-        if (_teamsConnected)
+        if (_graphConnected)
             return;
 
         await _connectMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_teamsConnected)
+            if (_graphConnected)
                 return;
 
-            try
-            {
-                AppLogger.WriteInfo("Importing MicrosoftTeams module...");
-                await _powerShell.ExecuteRawCommandAsync(
-                    "Import-Module",
-                    new Dictionary<string, object?> { ["Name"] = "MicrosoftTeams", ["Force"] = null },
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                var errorMsg = "Failed to import MicrosoftTeams module.";
-                if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
-                    errorMsg += $" PowerShell error: {psEx.CommandOutput}";
-                AppLogger.WriteError(errorMsg, ex);
-                throw new InvalidOperationException(errorMsg, ex);
-            }
+            AppLogger.WriteInfo("Connecting to Microsoft Graph...");
+            await _powerShell.ExecuteRawCommandAsync(
+                "Connect-MgGraph",
+                new Dictionary<string, object?> { ["Scopes"] = RequiredScopes },
+                cancellationToken).ConfigureAwait(false);
 
-            try
-            {
-                AppLogger.WriteInfo("Connecting to Microsoft Teams using existing authentication...");
-                // Get an access token for Teams API using the existing Azure auth
-                var accessToken = await _authService.GetAccessTokenAsync(TeamsScope, cancellationToken)
-                    .ConfigureAwait(false);
-
-                // Connect using the access token (no interactive prompt)
-                await _powerShell.ExecuteRawCommandAsync(
-                    "Connect-MicrosoftTeams",
-                    new Dictionary<string, object?> { ["AccessTokens"] = accessToken },
-                    cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                var errorMsg = "Failed to connect to Microsoft Teams.";
-                if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
-                    errorMsg += $" PowerShell error: {psEx.CommandOutput}";
-                AppLogger.WriteError(errorMsg, ex);
-                throw new InvalidOperationException(errorMsg, ex);
-            }
-
-            _teamsConnected = true;
-            AppLogger.WriteInfo("Microsoft Teams connection established.");
+            _graphConnected = true;
+            AppLogger.WriteInfo("Microsoft Graph connection established.");
         }
         finally
         {
@@ -1488,11 +1386,172 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
         }
     }
 
-    /// <summary>
-    /// Safely extract a property value from a PSObject.
-    /// PSObjects from PowerShell cmdlets store properties in the Members collection.
-    /// </summary>
-    private static string? GetPSObjectProperty(PSObject psObject, string propertyName)
+    private static AzureADUser? PSObjectToAzureADUser(PSObject psObject)
+    {
+        try
+        {
+            return new AzureADUser
+            {
+                DisplayName       = GetPSProperty(psObject, "DisplayName") ?? "(No Name)",
+                UserPrincipalName = GetPSProperty(psObject, "UserPrincipalName") ?? string.Empty,
+                Id                = GetPSProperty(psObject, "Id") ?? string.Empty,
+                UserType          = GetPSProperty(psObject, "UserType") ?? "Member",
+                AccountEnabled    = string.Equals(GetPSProperty(psObject, "AccountEnabled"), "True", StringComparison.OrdinalIgnoreCase),
+                JobTitle          = GetPSProperty(psObject, "JobTitle"),
+                Department        = GetPSProperty(psObject, "Department"),
+                Mail              = GetPSProperty(psObject, "Mail")
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? GetPSProperty(PSObject psObject, string propertyName)
+    {
+        if (psObject?.Members[propertyName]?.Value is var value && value != null)
+            return value.ToString();
+        return null;
+    }
+}
+
+/// <summary>
+/// Microsoft Intune device management via Microsoft Graph PowerShell.
+/// Uses the existing Microsoft Graph authentication session.
+/// </summary>
+public sealed class IntuneService : IIntuneService
+{
+    private const int MaxFilterLength = 200;
+    private const int MaxDeviceResults = 5000;
+
+    private readonly PowerShellHelper _powerShell;
+    private readonly SemaphoreSlim _connectMutex = new(1, 1);
+    private bool _graphConnected;
+
+    public string DisplayName   => "Intune Devices";
+    public string ServiceId     => "intune-devices";
+    public string Category      => "Intune";
+    public string[] RequiredScopes => ["DeviceManagementManagedDevices.Read.All"];
+    public string[] RequiredPowerShellModules => [];  // Uses Graph connection from main auth
+
+    public IntuneService(PowerShellHelper powerShell)
+    {
+        _powerShell = powerShell ?? throw new ArgumentNullException(nameof(powerShell));
+    }
+
+    public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
+        => AuditValidation.TryInitializeAsync(_powerShell, cancellationToken);
+
+    public string GetDescription()
+        => "Browse Intune managed devices: list all devices with compliance status, OS version, and last sync time. Filterable by device name.";
+
+    public async Task<IntuneDevicesResult> GetManagedDevicesAsync(
+        string? filterByName = null,
+        IProgress<AuditProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (filterByName != null && filterByName.Length > MaxFilterLength)
+            return new IntuneDevicesResult { Error = $"Filter exceeds maximum length ({MaxFilterLength})." };
+
+        try
+        {
+            progress?.Report(new AuditProgress { Current = 0, Total = 2, Status = "Connecting to Microsoft Graph..." });
+            await EnsureGraphConnectedAsync(cancellationToken).ConfigureAwait(false);
+
+            progress?.Report(new AuditProgress { Current = 1, Total = 2, Status = "Fetching managed devices from Intune..." });
+
+            var parameters = new Dictionary<string, object?>
+            {
+                ["All"] = null
+            };
+            if (!string.IsNullOrWhiteSpace(filterByName))
+            {
+                parameters["Filter"] = $"startsWith(deviceName,'{AuditValidation.EscapeFilterValue(filterByName)}')";
+            }
+
+            var results = await _powerShell.ExecuteRawCommandAsync(
+                "Get-MgDeviceManagementManagedDevice",
+                parameters,
+                cancellationToken).ConfigureAwait(false);
+
+            var devices = results
+                .Take(MaxDeviceResults)
+                .Select(PSObjectToIntuneDevice)
+                .Where(d => d != null)
+                .Cast<IntuneDevice>()
+                .OrderBy(d => d.DeviceName)
+                .ToList();
+
+            AppLogger.WriteInfo($"IntuneService: found {devices.Count} managed device(s).");
+            return new IntuneDevicesResult { Devices = devices };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLogger.WriteError("IntuneService.GetManagedDevicesAsync failed.", ex);
+            return new IntuneDevicesResult { Error = ex.Message };
+        }
+    }
+
+    private async Task EnsureGraphConnectedAsync(CancellationToken cancellationToken)
+    {
+        if (_graphConnected)
+            return;
+
+        await _connectMutex.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_graphConnected)
+                return;
+
+            AppLogger.WriteInfo("Connecting to Microsoft Graph for Intune...");
+            await _powerShell.ExecuteRawCommandAsync(
+                "Connect-MgGraph",
+                new Dictionary<string, object?> { ["Scopes"] = RequiredScopes },
+                cancellationToken).ConfigureAwait(false);
+
+            _graphConnected = true;
+            AppLogger.WriteInfo("Microsoft Graph connection (Intune) established.");
+        }
+        finally
+        {
+            _connectMutex.Release();
+        }
+    }
+
+    private static IntuneDevice? PSObjectToIntuneDevice(PSObject psObject)
+    {
+        try
+        {
+            var lastSync = GetPSProperty(psObject, "LastSyncDateTime");
+            DateTime? lastSyncDate = null;
+            if (lastSync != null && DateTime.TryParse(lastSync, out var parsed))
+                lastSyncDate = parsed;
+
+            return new IntuneDevice
+            {
+                DeviceName       = GetPSProperty(psObject, "DeviceName") ?? "(Unknown)",
+                Id               = GetPSProperty(psObject, "Id") ?? string.Empty,
+                OperatingSystem  = GetPSProperty(psObject, "OperatingSystem") ?? "Unknown",
+                OSVersion        = GetPSProperty(psObject, "OSVersion") ?? "Unknown",
+                ComplianceState  = GetPSProperty(psObject, "ComplianceState") ?? "Unknown",
+                ManagementState  = GetPSProperty(psObject, "ManagementState") ?? "Unknown",
+                LastSyncDateTime = lastSyncDate,
+                UserPrincipalName = GetPSProperty(psObject, "UserPrincipalName"),
+                Model            = GetPSProperty(psObject, "Model")
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? GetPSProperty(PSObject psObject, string propertyName)
     {
         if (psObject?.Members[propertyName]?.Value is var value && value != null)
             return value.ToString();

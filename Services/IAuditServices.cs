@@ -209,50 +209,63 @@ public class GroupMember
 }
 
 /// <summary>
-/// Audit service for Microsoft Teams — lists teams and their membership.
-/// Requires the MicrosoftTeams PowerShell module.
+/// Audit service for Azure AD/Entra ID user and group management via Microsoft Graph.
 /// </summary>
-public interface ITeamsExplorerService : IAuditService
+public interface IAzureADService : IAuditService
 {
-    Task<TeamsListResult> GetTeamsAsync(
+    Task<AzureADUsersResult> GetUsersAsync(
         string? filterByName = null,
-        IProgress<AuditProgress>? progress = null,
-        CancellationToken cancellationToken = default);
-
-    Task<TeamMembersResult> GetTeamMembersAsync(
-        string groupId,
+        bool includeGuestUsers = true,
         IProgress<AuditProgress>? progress = null,
         CancellationToken cancellationToken = default);
 }
 
-public class TeamsListResult
+public class AzureADUsersResult
 {
-    public List<TeamInfo> Teams { get; set; } = [];
+    public List<AzureADUser> Users { get; set; } = [];
     public string? Error { get; set; }
     public bool Success => Error == null;
 }
 
-public class TeamInfo
-{
-    public required string DisplayName { get; set; }
-    public required string GroupId { get; set; }
-    public string? Description { get; set; }
-    public string? Visibility { get; set; }   // Public / Private / HiddenMembership
-    public bool IsArchived { get; set; }
-    public int? MemberCount { get; set; }
-}
-
-public class TeamMembersResult
-{
-    public required string TeamName { get; set; }
-    public List<TeamMemberEntry> Members { get; set; } = [];
-    public string? Error { get; set; }
-    public bool Success => Error == null;
-}
-
-public class TeamMemberEntry
+public class AzureADUser
 {
     public required string DisplayName { get; set; }
     public required string UserPrincipalName { get; set; }
-    public required string Role { get; set; }   // Owner / Member / Guest
+    public required string Id { get; set; }
+    public required string UserType { get; set; }  // Member / Guest
+    public bool AccountEnabled { get; set; }
+    public string? JobTitle { get; set; }
+    public string? Department { get; set; }
+    public string? Mail { get; set; }
+}
+
+/// <summary>
+/// Audit service for Microsoft Intune device management via Microsoft Graph.
+/// </summary>
+public interface IIntuneService : IAuditService
+{
+    Task<IntuneDevicesResult> GetManagedDevicesAsync(
+        string? filterByName = null,
+        IProgress<AuditProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+}
+
+public class IntuneDevicesResult
+{
+    public List<IntuneDevice> Devices { get; set; } = [];
+    public string? Error { get; set; }
+    public bool Success => Error == null;
+}
+
+public class IntuneDevice
+{
+    public required string DeviceName { get; set; }
+    public required string Id { get; set; }
+    public required string OperatingSystem { get; set; }
+    public required string OSVersion { get; set; }
+    public required string ComplianceState { get; set; }  // Compliant / Noncompliant / Unknown
+    public required string ManagementState { get; set; }   // Managed / Unmanaged
+    public DateTime? LastSyncDateTime { get; set; }
+    public string? UserPrincipalName { get; set; }
+    public string? Model { get; set; }
 }

@@ -63,11 +63,11 @@ public static class ModuleRegistry
             svc => new GroupExplorerTab((IGroupExplorerService)svc)),
 
         new(
-            (ps, auth) => new AzureADService(ps),
+            (ps, auth) => new AzureADService(ps, auth),
             svc => new AzureADUsersTab((IAzureADService)svc)),
 
         new(
-            (ps, auth) => new IntuneService(ps),
+            (ps, auth) => new IntuneService(ps, auth),
             svc => new IntuneDevicesTab((IIntuneService)svc)),
     ];
     // ADD NEW MODULES HERE ↑ ───────────────────────────────────────────────

@@ -1275,8 +1275,10 @@ public sealed class AzureADService : IAzureADService
 {
     private const int MaxFilterLength = 200;
     private const int MaxUserResults  = 5000;
+    private const string GraphScope   = "https://graph.microsoft.com/.default";
 
     private readonly PowerShellHelper _powerShell;
+    private readonly IAuthService _authService;
     private readonly SemaphoreSlim _connectMutex = new(1, 1);
     private bool _graphConnected;
 
@@ -1284,11 +1286,12 @@ public sealed class AzureADService : IAzureADService
     public string ServiceId     => "azuread-users";
     public string Category      => "Azure AD";
     public string[] RequiredScopes => ["User.Read.All", "Directory.Read.All"];
-    public string[] RequiredPowerShellModules => [];  // Uses Graph connection from main auth
+    public string[] RequiredPowerShellModules => ["Microsoft.Graph"];
 
-    public AzureADService(PowerShellHelper powerShell)
+    public AzureADService(PowerShellHelper powerShell, IAuthService authService)
     {
         _powerShell = powerShell ?? throw new ArgumentNullException(nameof(powerShell));
+        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     }
 
     public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
@@ -1371,10 +1374,16 @@ public sealed class AzureADService : IAzureADService
             if (_graphConnected)
                 return;
 
-            AppLogger.WriteInfo("Connecting to Microsoft Graph...");
+            AppLogger.WriteInfo("Connecting to Microsoft Graph using existing authentication...");
+            
+            // Get access token from existing Azure auth (reuses MSAL session)
+            var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Connect using the access token (no interactive prompt)
             await _powerShell.ExecuteRawCommandAsync(
                 "Connect-MgGraph",
-                new Dictionary<string, object?> { ["Scopes"] = RequiredScopes },
+                new Dictionary<string, object?> { ["AccessToken"] = accessToken },
                 cancellationToken).ConfigureAwait(false);
 
             _graphConnected = true;
@@ -1424,8 +1433,10 @@ public sealed class IntuneService : IIntuneService
 {
     private const int MaxFilterLength = 200;
     private const int MaxDeviceResults = 5000;
+    private const string GraphScope   = "https://graph.microsoft.com/.default";
 
     private readonly PowerShellHelper _powerShell;
+    private readonly IAuthService _authService;
     private readonly SemaphoreSlim _connectMutex = new(1, 1);
     private bool _graphConnected;
 
@@ -1433,11 +1444,12 @@ public sealed class IntuneService : IIntuneService
     public string ServiceId     => "intune-devices";
     public string Category      => "Intune";
     public string[] RequiredScopes => ["DeviceManagementManagedDevices.Read.All"];
-    public string[] RequiredPowerShellModules => [];  // Uses Graph connection from main auth
+    public string[] RequiredPowerShellModules => ["Microsoft.Graph"];
 
-    public IntuneService(PowerShellHelper powerShell)
+    public IntuneService(PowerShellHelper powerShell, IAuthService authService)
     {
         _powerShell = powerShell ?? throw new ArgumentNullException(nameof(powerShell));
+        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     }
 
     public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
@@ -1508,10 +1520,16 @@ public sealed class IntuneService : IIntuneService
             if (_graphConnected)
                 return;
 
-            AppLogger.WriteInfo("Connecting to Microsoft Graph for Intune...");
+            AppLogger.WriteInfo("Connecting to Microsoft Graph (Intune) using existing authentication...");
+            
+            // Get access token from existing Azure auth (reuses MSAL session)
+            var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
+                .ConfigureAwait(false);
+
+            // Connect using the access token (no interactive prompt)
             await _powerShell.ExecuteRawCommandAsync(
                 "Connect-MgGraph",
-                new Dictionary<string, object?> { ["Scopes"] = RequiredScopes },
+                new Dictionary<string, object?> { ["AccessToken"] = accessToken },
                 cancellationToken).ConfigureAwait(false);
 
             _graphConnected = true;

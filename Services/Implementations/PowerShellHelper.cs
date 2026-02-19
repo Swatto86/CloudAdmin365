@@ -318,67 +318,28 @@ public sealed class PowerShellHelper : IDisposable
             throw new InvalidOperationException("PowerShell runspace not initialized.");
         }
 
-        var userPrincipalName = _authService.CurrentUser?.UserPrincipalName;
-        AppLogger.WriteInfo("Connecting to Exchange Online.");
+        AppLogger.WriteInfo("Connecting to Exchange Online using existing authentication...");
 
-        // Get the main window handle to enable interactive authentication
-        // This is needed for browser-based authentication to work from a background runspace
-        var mainWindowHandle = IntPtr.Zero;
         try
         {
-            var activeForm = Form.ActiveForm;
-            if (activeForm != null)
-            {
-                mainWindowHandle = activeForm.Handle;
-                AppLogger.WriteDebug($"Using window handle {mainWindowHandle} for interactive authentication.");
-            }
-        }
-        catch { /* If we can't get the handle, proceed anyway */ }
+            // Get access token from existing Azure auth (reuses MSAL session)
+            // Exchange Online scope for token-based authentication
+            const string ExchangeScope = "https://outlook.office365.com/.default";
+            var accessToken = await _authService.GetAccessTokenAsync(ExchangeScope, cancellationToken)
+                .ConfigureAwait(false);
 
-        // Try simple method first: just use the UPN with the currently authenticated session
-        // This works if the user already has exchange permissions
-        try
-        {
+            // Extract organization domain from UPN (e.g., "user@company.com" -> "company.com")
+            var upn = _authService.CurrentUser?.UserPrincipalName ?? "";
+            var atIndex = upn.IndexOf('@');
+            var organization = atIndex >= 0 ? upn.Substring(atIndex + 1) : "";
+
+            // Connect using the access token (no interactive prompt)
+            // Note: Connect-ExchangeOnline accepts -AccessToken as a plain string, unlike Connect-MgGraph
             await ExecuteInternalAsync(ps =>
             {
                 ps.AddCommand("Connect-ExchangeOnline");
-                ps.AddParameter("ShowBanner", false);
-                ps.AddParameter("SkipLoadingCmdletHelp", true);
-                ps.AddParameter("ShowProgress", false);
-                if (!string.IsNullOrWhiteSpace(userPrincipalName))
-                {
-                    ps.AddParameter("UserPrincipalName", userPrincipalName);
-                }
-                ps.AddParameter("ErrorAction", "Stop");
-            }, cancellationToken, allowReconnect: false, skipConnect: true).ConfigureAwait(false);
-
-            _connected = true;
-            AppLogger.WriteInfo("Exchange Online connection established via user context.");
-            return;
-        }
-        catch (Exception ex)
-        {
-            AppLogger.WriteInfo($"Simple connection method failed: {ex.Message}. Connecting with interactive authentication...");
-        }
-
-        // Fall back to interactive authentication
-        // The browser should open automatically when Connect-ExchangeOnline is called
-        try
-        {
-            AppLogger.WriteInfo("Opening browser for Exchange Online authentication. Please complete the authentication process.");
-            
-            // Show a brief message to let user know what's happening
-            MessageBox.Show(
-                "A browser window will open for Exchange Online authentication.\n\n" +
-                "Please sign in with your Exchange Online admin account and authorize the connection.",
-                "Exchange Online Authentication",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
-
-            // Call Connect-ExchangeOnline without parameters - will trigger browser auth
-            await ExecuteInternalAsync(ps =>
-            {
-                ps.AddCommand("Connect-ExchangeOnline");
+                ps.AddParameter("AccessToken", accessToken);
+                ps.AddParameter("Organization", organization);
                 ps.AddParameter("ShowBanner", false);
                 ps.AddParameter("SkipLoadingCmdletHelp", true);
                 ps.AddParameter("ShowProgress", false);
@@ -386,10 +347,11 @@ public sealed class PowerShellHelper : IDisposable
             }, cancellationToken, allowReconnect: false, skipConnect: true).ConfigureAwait(false);
 
             _connected = true;
-            AppLogger.WriteInfo("Exchange Online connection established after browser authentication.");
+            AppLogger.WriteInfo("Exchange Online connection established.");
         }
         catch (Exception ex)
         {
+            AppLogger.WriteError("Failed to connect to Exchange Online.", ex);
             throw new PowerShellCommandException("Failed to establish Exchange Online connection.", ex);
         }
     }

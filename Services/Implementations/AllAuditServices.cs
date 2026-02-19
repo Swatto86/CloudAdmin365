@@ -1380,10 +1380,16 @@ public sealed class AzureADService : IAzureADService
             var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Convert to SecureString (required by newer Microsoft.Graph module)
+            var secureToken = new System.Security.SecureString();
+            foreach (char c in accessToken)
+                secureToken.AppendChar(c);
+            secureToken.MakeReadOnly();
+
             // Connect using the access token (no interactive prompt)
             await _powerShell.ExecuteRawCommandAsync(
                 "Connect-MgGraph",
-                new Dictionary<string, object?> { ["AccessToken"] = accessToken },
+                new Dictionary<string, object?> { ["AccessToken"] = secureToken },
                 cancellationToken).ConfigureAwait(false);
 
             _graphConnected = true;
@@ -1526,10 +1532,16 @@ public sealed class IntuneService : IIntuneService
             var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
                 .ConfigureAwait(false);
 
+            // Convert to SecureString (required by newer Microsoft.Graph module)
+            var secureToken = new System.Security.SecureString();
+            foreach (char c in accessToken)
+                secureToken.AppendChar(c);
+            secureToken.MakeReadOnly();
+
             // Connect using the access token (no interactive prompt)
             await _powerShell.ExecuteRawCommandAsync(
                 "Connect-MgGraph",
-                new Dictionary<string, object?> { ["AccessToken"] = accessToken },
+                new Dictionary<string, object?> { ["AccessToken"] = secureToken },
                 cancellationToken).ConfigureAwait(false);
 
             _graphConnected = true;

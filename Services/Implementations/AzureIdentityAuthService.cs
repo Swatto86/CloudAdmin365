@@ -9,12 +9,13 @@ using Microsoft.Identity.Client;
 
 /// <summary>
 /// Azure AD authentication service using MSAL with interactive browser login.
-/// Uses Microsoft Graph PowerShell's public client ID for consent-free authentication.
+/// Uses Microsoft Office public client ID for pre-consented access to M365 services.
 /// </summary>
 public class AzureIdentityAuthService : IAuthService
 {
-    // Microsoft Graph PowerShell public client (pre-consented for common Graph scopes)
-    private const string PUBLIC_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
+    // Microsoft Office public client (pre-consented for Graph, Exchange, and other M365 services)
+    // This replaces the Graph-only client ID to enable token acquisition for multiple resources.
+    private const string PUBLIC_CLIENT_ID = "d3590ed6-52b3-4102-aeff-aad2292ab01c";
     private const string TENANT_ID = "organizations"; // Multi-tenant: any Azure AD
     private const string REDIRECT_URI = "http://localhost";
 
@@ -156,8 +157,9 @@ public class AzureIdentityAuthService : IAuthService
     }
 
     /// <summary>
-    /// Get access token for Microsoft Graph API calls.
-    /// Automatically handles token refresh via MSAL cache.
+    /// Get access token for Microsoft 365 API calls (Graph, Exchange, etc.).
+    /// Automatically handles token caching and refresh via MSAL.
+    /// On first request for a new resource, may prompt for consent interactively.
     /// </summary>
     public async Task<string> GetAccessTokenAsync(string scope, CancellationToken cancellationToken = default)
     {

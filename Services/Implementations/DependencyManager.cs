@@ -25,7 +25,9 @@ public sealed class DependencyManager
 
     /// <summary>
     /// Checks all required PowerShell modules (derived from <paramref name="services"/>),
-    /// prompts to install any missing ones, then returns a map of module → installed status.
+    /// ALWAYS shows the dependency dialog so users see which modules are available,
+    /// and offers to install any missing ones. Returns a map of module → installed status.
+    /// Modules that are not installed will have their nav sections disabled in the main UI.
     /// Also verifies the .NET runtime version.
     /// </summary>
     /// <param name="services">All registered services; their RequiredPowerShellModules are unioned.</param>
@@ -68,15 +70,14 @@ public sealed class DependencyManager
             }
 
             var missing = availability.Where(kv => !kv.Value).Select(kv => kv.Key).ToList();
-            if (missing.Count == 0)
-            {
-                AppLogger.WriteInfo("All required PowerShell modules are satisfied.");
-                return availability;
-            }
 
-            AppLogger.WriteDebug($"Missing modules, showing dependency dialog: [{string.Join(", ", missing)}]");
+            // Always show the dependency dialog so the user can see the status of all
+            // modules and install any missing ones. When everything is installed the
+            // dialog still shows — with all green ticks — for transparency.
+            AppLogger.WriteInfo(missing.Count == 0
+                ? "All required PowerShell modules are satisfied. Showing status dialog."
+                : $"Missing modules: [{string.Join(", ", missing)}]. Showing dependency dialog.");
 
-            // Show the enhanced dependency dialog.
             var installed2 = await ShowDependencyDialogAsync(availability, missing, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -281,23 +282,25 @@ Write-Host 'Installation completed successfully.'
         private static readonly Color InstalledColor   = Color.FromArgb(0, 180, 90);
         private static readonly Color MissingColor     = Color.FromArgb(220, 60, 60);
         private static readonly Color DialogBackground = Color.FromArgb(248, 250, 252);
+        private static readonly Color AccentBlue       = Color.FromArgb(0, 120, 212);
 
         public IReadOnlyList<string> ModulesToInstall { get; private set; } = [];
 
         private readonly Dictionary<string, bool> _availability;
-        private readonly List<CheckBox>            _installChecks  = [];
+        private readonly List<CheckBox>           _installChecks = [];
+        private readonly bool                     _allInstalled;
 
         public DependencyDialog(Dictionary<string, bool> availability)
         {
             _availability = availability;
+            _allInstalled = availability.Values.All(v => v);
             BuildUI();
         }
 
         private void BuildUI()
         {
-            Text            = "CloudAdmin365— Module Dependencies";
-            Size            = new Size(520, 0);    // height autosized below
-            MinimumSize     = new Size(480, 300);
+            // ── Form properties ──────────────────────────────────────────
+            Text            = "CloudAdmin365 \u2014 Module Dependencies";
             StartPosition   = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox     = false;
@@ -305,34 +308,45 @@ Write-Host 'Installation completed successfully.'
             BackColor       = DialogBackground;
             Font            = new Font("Segoe UI", 9f);
             AutoScaleMode   = AutoScaleMode.Dpi;
+            Icon            = IconGenerator.GetAppIcon();
+            ShowInTaskbar   = true;
 
+            // We build everything inside a non-docked panel so we can
+            // measure its preferred size and set the form's ClientSize once.
             var outer = new TableLayoutPanel
             {
-                Dock        = DockStyle.Fill,
-                ColumnCount = 1,
-                RowCount    = 3,
-                Padding     = new Padding(16)
+                AutoSize     = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                ColumnCount  = 1,
+                RowCount     = 3,
+                Padding      = new Padding(20, 16, 20, 16)
             };
-            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // title + intro
+            outer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // header
             outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // module rows
             outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));   // buttons
 
-            // Title
+            // ── Header ───────────────────────────────────────────────────
             var lblTitle = new Label
             {
-                Text      = "Required PowerShell Modules",
+                Text      = _allInstalled
+                    ? "All Modules Installed"
+                    : "Required PowerShell Modules",
                 Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(20, 60, 100),
                 AutoSize  = true,
-                Margin    = new Padding(0, 0, 0, 6)
+                Margin    = new Padding(0, 0, 0, 4)
             };
+
+            var introText = _allInstalled
+                ? "All required PowerShell modules are installed and ready."
+                : "CloudAdmin365 requires the following PowerShell modules.\n" +
+                  "Tick any missing modules to install them automatically,\n" +
+                  "or click Continue to proceed (disabled modules\u2019 features won\u2019t be available).";
 
             var lblIntro = new Label
             {
-                Text =
-                    "CloudAdmin365 requires the following PowerShell modules.\n" +
-                    "Tick any missing modules to install them automatically,\n" +
-                    "or click \"Continue\" to proceed without them (those modules' features will be disabled).",
+                Text      = introText,
                 AutoSize  = true,
                 ForeColor = Color.FromArgb(60, 80, 100),
                 Margin    = new Padding(0, 0, 0, 14)
@@ -342,51 +356,52 @@ Write-Host 'Installation completed successfully.'
             {
                 FlowDirection = FlowDirection.TopDown,
                 AutoSize      = true,
+                AutoSizeMode  = AutoSizeMode.GrowAndShrink,
                 WrapContents  = false,
-                Dock          = DockStyle.Fill,
                 Margin        = new Padding(0)
             };
             headerPanel.Controls.Add(lblTitle);
             headerPanel.Controls.Add(lblIntro);
             outer.Controls.Add(headerPanel, 0, 0);
 
-            // Module rows
+            // ── Module rows ──────────────────────────────────────────────
             var modulePanel = new TableLayoutPanel
             {
-                ColumnCount = 3,
-                AutoSize    = true,
+                ColumnCount  = 3,
+                AutoSize     = true,
                 AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Dock        = DockStyle.Fill,
-                Margin      = new Padding(0, 0, 0, 16)
+                Margin       = new Padding(0, 0, 0, 18)
             };
-            modulePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 26));   // icon
-            modulePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // name
-            modulePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));  // install check
+            modulePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 28));   // status icon
+            modulePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230));  // module name
+            modulePanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));  // status / checkbox
 
             foreach (var (module, isInstalled) in _availability.OrderBy(kv => kv.Key))
             {
-                modulePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+                modulePanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
 
-                // Status indicator
                 var lblStatus = new Label
                 {
-                    Text      = isInstalled ? "✓" : "✗",
+                    Text      = isInstalled ? "\u2713" : "\u2717",
                     ForeColor = isInstalled ? InstalledColor : MissingColor,
                     Font      = new Font("Segoe UI", 12f, FontStyle.Bold),
                     TextAlign = ContentAlignment.MiddleCenter,
-                    Dock      = DockStyle.Fill
+                    Dock      = DockStyle.Fill,
+                    Margin    = new Padding(0)
                 };
 
-                // Module name
                 var lblName = new Label
                 {
                     Text      = module,
                     TextAlign = ContentAlignment.MiddleLeft,
                     Dock      = DockStyle.Fill,
-                    ForeColor = Color.FromArgb(30, 50, 80)
+                    ForeColor = Color.FromArgb(30, 50, 80),
+                    Margin    = new Padding(4, 0, 0, 0)
                 };
 
-                // Install checkbox (only for missing)
+                modulePanel.Controls.Add(lblStatus);
+                modulePanel.Controls.Add(lblName);
+
                 if (!isInstalled)
                 {
                     var chk = new CheckBox
@@ -394,11 +409,10 @@ Write-Host 'Installation completed successfully.'
                         Text    = "Install automatically",
                         Checked = true,
                         Dock    = DockStyle.Fill,
-                        Tag     = module
+                        Tag     = module,
+                        Margin  = new Padding(0)
                     };
                     _installChecks.Add(chk);
-                    modulePanel.Controls.Add(lblStatus);
-                    modulePanel.Controls.Add(lblName);
                     modulePanel.Controls.Add(chk);
                 }
                 else
@@ -407,59 +421,78 @@ Write-Host 'Installation completed successfully.'
                     {
                         Text      = "Installed",
                         ForeColor = InstalledColor,
+                        Font      = new Font("Segoe UI", 9f, FontStyle.Regular),
                         TextAlign = ContentAlignment.MiddleLeft,
-                        Dock      = DockStyle.Fill
+                        Dock      = DockStyle.Fill,
+                        Margin    = new Padding(0)
                     };
-                    modulePanel.Controls.Add(lblStatus);
-                    modulePanel.Controls.Add(lblName);
                     modulePanel.Controls.Add(lblOk);
                 }
             }
 
             outer.Controls.Add(modulePanel, 0, 1);
 
-            // Buttons
-            var btnInstall = new Button
-            {
-                Text      = "Install selected & continue",
-                Width     = 200,
-                Height    = 34,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(0, 120, 212),
-                ForeColor = Color.White,
-                Font      = new Font("Segoe UI", 9f),
-                Cursor    = Cursors.Hand
-            };
-            btnInstall.FlatAppearance.BorderSize = 0;
-            btnInstall.Click += BtnInstall_Click;
-
-            var btnSkip = new Button
-            {
-                Text      = "Continue without installing",
-                Width     = 190,
-                Height    = 34,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Color.FromArgb(230, 235, 242),
-                ForeColor = Color.FromArgb(50, 60, 80),
-                Cursor    = Cursors.Hand
-            };
-            btnSkip.FlatAppearance.BorderSize = 1;
-            btnSkip.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
-
+            // ── Buttons ──────────────────────────────────────────────────
             var btnPanel = new FlowLayoutPanel
             {
                 FlowDirection = FlowDirection.LeftToRight,
                 AutoSize      = true,
+                AutoSizeMode  = AutoSizeMode.GrowAndShrink,
                 WrapContents  = false,
                 Margin        = new Padding(0)
             };
-            btnPanel.Controls.Add(btnInstall);
-            btnPanel.Controls.Add(new Panel { Width = 10, Height = 1 }); // spacer
-            btnPanel.Controls.Add(btnSkip);
-            outer.Controls.Add(btnPanel, 0, 2);
 
+            if (_allInstalled)
+            {
+                // All modules present — single "Continue" button.
+                var btnContinue = CreateButton("Continue", AccentBlue, Color.White, 160);
+                btnContinue.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); };
+                btnPanel.Controls.Add(btnContinue);
+            }
+            else
+            {
+                // Some missing — "Install & Continue" + "Continue" (skip).
+                var btnInstall = CreateButton("Install && Continue", AccentBlue, Color.White, 180);
+                btnInstall.Click += BtnInstall_Click;
+                btnPanel.Controls.Add(btnInstall);
+
+                btnPanel.Controls.Add(new Panel { Width = 10, Height = 1 }); // spacer
+
+                var btnSkip = CreateButton("Continue", Color.FromArgb(230, 235, 242),
+                    Color.FromArgb(50, 60, 80), 120);
+                btnSkip.FlatAppearance.BorderColor = Color.FromArgb(190, 200, 210);
+                btnSkip.FlatAppearance.BorderSize  = 1;
+                btnSkip.Click += (_, _) => { DialogResult = DialogResult.OK; Close(); };
+                btnPanel.Controls.Add(btnSkip);
+            }
+
+            outer.Controls.Add(btnPanel, 0, 2);
             Controls.Add(outer);
-            ClientSize = new Size(486, outer.GetPreferredSize(Size.Empty).Height + 32);
+
+            // Size the form to fit the content.
+            var preferred = outer.GetPreferredSize(new Size(540, 0));
+            ClientSize = new Size(
+                Math.Max(preferred.Width, 460),
+                preferred.Height);
+            MinimumSize = Size; // lock to the computed size
+        }
+
+        /// <summary>Creates a styled flat button with consistent appearance.</summary>
+        private static Button CreateButton(string text, Color backColor, Color foreColor, int width)
+        {
+            var btn = new Button
+            {
+                Text      = text,
+                Width     = width,
+                Height    = 34,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = backColor,
+                ForeColor = foreColor,
+                Font      = new Font("Segoe UI", 9f),
+                Cursor    = Cursors.Hand
+            };
+            btn.FlatAppearance.BorderSize = 0;
+            return btn;
         }
 
         private void BtnInstall_Click(object? sender, EventArgs e)

@@ -1275,8 +1275,10 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
 {
     private const int MaxFilterLength = 200;
     private const int MaxTeamResults  = 1000;
+    private const string TeamsScope   = "https://api.spaces.skype.com/.default";
 
     private readonly PowerShellHelper _powerShell;
+    private readonly IAuthService _authService;
     private readonly SemaphoreSlim _connectMutex = new(1, 1);
     private bool _teamsConnected;
 
@@ -1286,9 +1288,10 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
     public string[] RequiredScopes => ["Team.ReadBasic.All", "TeamMember.Read.All"];
     public string[] RequiredPowerShellModules => ["MicrosoftTeams"];
 
-    public TeamsExplorerService(PowerShellHelper powerShell)
+    public TeamsExplorerService(PowerShellHelper powerShell, IAuthService authService)
     {
         _powerShell = powerShell ?? throw new ArgumentNullException(nameof(powerShell));
+        _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     }
 
     public Task<bool> IsAvailableAsync(CancellationToken cancellationToken = default)
@@ -1319,7 +1322,7 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
             if (!string.IsNullOrWhiteSpace(filterByName))
                 parameters["DisplayName"] = AuditValidation.EscapeFilterValue(filterByName);
 
-            var results = await _powerShell.ExecuteCommandAsync(
+            var results = await _powerShell.ExecuteRawCommandAsync(
                 "Get-Team",
                 parameters,
                 cancellationToken).ConfigureAwait(false);
@@ -1330,12 +1333,12 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
                 .Take(MaxTeamResults)
                 .Select(r => new TeamInfo
                 {
-                    DisplayName = r.Properties["DisplayName"]?.Value?.ToString() ?? "(No Name)",
-                    GroupId     = r.Properties["GroupId"]?.Value?.ToString()    ?? string.Empty,
-                    Description = r.Properties["Description"]?.Value?.ToString(),
-                    Visibility  = r.Properties["Visibility"]?.Value?.ToString(),
+                    DisplayName = GetPSObjectProperty(r, "DisplayName") ?? "(No Name)",
+                    GroupId     = GetPSObjectProperty(r, "GroupId")     ?? string.Empty,
+                    Description = GetPSObjectProperty(r, "Description"),
+                    Visibility  = GetPSObjectProperty(r, "Visibility"),
                     IsArchived  = string.Equals(
-                        r.Properties["Archived"]?.Value?.ToString(), "True",
+                        GetPSObjectProperty(r, "Archived"), "True",
                         StringComparison.OrdinalIgnoreCase)
                 })
                 .ToList();
@@ -1351,8 +1354,17 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
         }
         catch (Exception ex)
         {
-            AppLogger.WriteError("TeamsExplorerService.GetTeamsAsync failed.", ex);
-            return new TeamsListResult { Error = ex.Message };
+            var errorMsg = ex.Message;
+            if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
+            {
+                errorMsg = psEx.CommandOutput;
+                AppLogger.WriteError($"TeamsExplorerService.GetTeamsAsync failed. PowerShell errors:\n{psEx.CommandOutput}", ex);
+            }
+            else
+            {
+                AppLogger.WriteError("TeamsExplorerService.GetTeamsAsync failed.", ex);
+            }
+            return new TeamsListResult { Error = errorMsg };
         }
     }
 
@@ -1372,7 +1384,7 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
             progress?.Report(new AuditProgress { Current = 0, Total = 2, Status = "Fetching team members..." });
             await EnsureTeamsConnectedAsync(cancellationToken).ConfigureAwait(false);
 
-            var results = await _powerShell.ExecuteCommandAsync(
+            var results = await _powerShell.ExecuteRawCommandAsync(
                 "Get-TeamUser",
                 new Dictionary<string, object?> { ["GroupId"] = groupId },
                 cancellationToken).ConfigureAwait(false);
@@ -1380,9 +1392,9 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
             var members = results
                 .Select(r => new TeamMemberEntry
                 {
-                    DisplayName       = r.Properties["Name"]?.Value?.ToString()  ?? "(Unknown)",
-                    UserPrincipalName = r.Properties["User"]?.Value?.ToString()  ?? string.Empty,
-                    Role              = r.Properties["Role"]?.Value?.ToString()  ?? "Member"
+                    DisplayName       = GetPSObjectProperty(r, "Name") ?? GetPSObjectProperty(r, "DisplayName") ?? "(Unknown)",
+                    UserPrincipalName = GetPSObjectProperty(r, "User") ?? GetPSObjectProperty(r, "UserPrincipalName") ?? string.Empty,
+                    Role              = GetPSObjectProperty(r, "Role") ?? "Member"
                 })
                 .OrderBy(m => m.Role)   // Owners first
                 .ThenBy(m => m.DisplayName)
@@ -1399,8 +1411,17 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
         }
         catch (Exception ex)
         {
-            AppLogger.WriteError("TeamsExplorerService.GetTeamMembersAsync failed.", ex);
-            return new TeamMembersResult { TeamName = groupId, Error = ex.Message };
+            var errorMsg = ex.Message;
+            if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
+            {
+                errorMsg = psEx.CommandOutput;
+                AppLogger.WriteError($"TeamsExplorerService.GetTeamMembersAsync failed. PowerShell errors:\n{psEx.CommandOutput}", ex);
+            }
+            else
+            {
+                AppLogger.WriteError("TeamsExplorerService.GetTeamMembersAsync failed.", ex);
+            }
+            return new TeamMembersResult { TeamName = groupId, Error = errorMsg };
         }
     }
 
@@ -1419,19 +1440,44 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
             if (_teamsConnected)
                 return;
 
-            AppLogger.WriteInfo("Importing MicrosoftTeams module...");
-            await _powerShell.ExecuteCommandAsync(
-                "Import-Module",
-                new Dictionary<string, object?> { ["Name"] = "MicrosoftTeams", ["Force"] = null },
-                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                AppLogger.WriteInfo("Importing MicrosoftTeams module...");
+                await _powerShell.ExecuteRawCommandAsync(
+                    "Import-Module",
+                    new Dictionary<string, object?> { ["Name"] = "MicrosoftTeams", ["Force"] = null },
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var errorMsg = "Failed to import MicrosoftTeams module.";
+                if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
+                    errorMsg += $" PowerShell error: {psEx.CommandOutput}";
+                AppLogger.WriteError(errorMsg, ex);
+                throw new InvalidOperationException(errorMsg, ex);
+            }
 
-            AppLogger.WriteInfo("Connecting to Microsoft Teams (modern auth)...");
-            // Connect-MicrosoftTeams with no parameters triggers device code / browser login.
-            // In a real deployment pass -AccessToken from the MSAL token cache.
-            await _powerShell.ExecuteCommandAsync(
-                "Connect-MicrosoftTeams",
-                new Dictionary<string, object?>(),
-                cancellationToken).ConfigureAwait(false);
+            try
+            {
+                AppLogger.WriteInfo("Connecting to Microsoft Teams using existing authentication...");
+                // Get an access token for Teams API using the existing Azure auth
+                var accessToken = await _authService.GetAccessTokenAsync(TeamsScope, cancellationToken)
+                    .ConfigureAwait(false);
+
+                // Connect using the access token (no interactive prompt)
+                await _powerShell.ExecuteRawCommandAsync(
+                    "Connect-MicrosoftTeams",
+                    new Dictionary<string, object?> { ["AccessTokens"] = accessToken },
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                var errorMsg = "Failed to connect to Microsoft Teams.";
+                if (ex is PowerShellCommandException psEx && !string.IsNullOrWhiteSpace(psEx.CommandOutput))
+                    errorMsg += $" PowerShell error: {psEx.CommandOutput}";
+                AppLogger.WriteError(errorMsg, ex);
+                throw new InvalidOperationException(errorMsg, ex);
+            }
 
             _teamsConnected = true;
             AppLogger.WriteInfo("Microsoft Teams connection established.");
@@ -1440,5 +1486,16 @@ public sealed class TeamsExplorerService : ITeamsExplorerService
         {
             _connectMutex.Release();
         }
+    }
+
+    /// <summary>
+    /// Safely extract a property value from a PSObject.
+    /// PSObjects from PowerShell cmdlets store properties in the Members collection.
+    /// </summary>
+    private static string? GetPSObjectProperty(PSObject psObject, string propertyName)
+    {
+        if (psObject?.Members[propertyName]?.Value is var value && value != null)
+            return value.ToString();
+        return null;
     }
 }

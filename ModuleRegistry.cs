@@ -22,47 +22,48 @@ using CloudAdmin365.Utilities;
 public static class ModuleRegistry
 {
     // ── Module descriptor ─────────────────────────────────────────────────
-    // Each entry maps a service factory (PowerShellHelper → IAuditService)
+    // Each entry maps a service factory (PowerShellHelper + IAuthService → IAuditService)
     // to a tab factory (IAuditService → UserControl).
+    // Most services only need PowerShellHelper; some (like Teams) also need IAuthService.
     // ─────────────────────────────────────────────────────────────────────
 
     private sealed record ModuleDescriptor(
-        Func<PowerShellHelper, IAuditService> ServiceFactory,
-        Func<IAuditService, UserControl>      TabFactory);
+        Func<PowerShellHelper, IAuthService, IAuditService> ServiceFactory,
+        Func<IAuditService, UserControl>                    TabFactory);
 
     // ADD NEW MODULES HERE ↓ ───────────────────────────────────────────────
     private static readonly IReadOnlyList<ModuleDescriptor> _descriptors =
     [
         new(
-            ps  => new RoomPermissionsService(ps),
+            (ps, auth) => new RoomPermissionsService(ps),
             svc => new RoomPermissionsTab((IRoomPermissionsService)svc)),
 
         new(
-            ps  => new RoomBookingAuditService(ps),
+            (ps, auth) => new RoomBookingAuditService(ps),
             svc => new RoomBookingTab((IRoomBookingAuditService)svc)),
 
         new(
-            ps  => new CalendarDiagnosticService(ps),
+            (ps, auth) => new CalendarDiagnosticService(ps),
             svc => new CalendarDiagnosticTab((ICalendarDiagnosticService)svc)),
 
         new(
-            ps  => new MailboxPermissionsService(ps),
+            (ps, auth) => new MailboxPermissionsService(ps),
             svc => new MailboxPermissionsTab((IMailboxPermissionsService)svc)),
 
         new(
-            ps  => new MailForwardingAuditService(ps),
+            (ps, auth) => new MailForwardingAuditService(ps),
             svc => new MailForwardingTab((IMailForwardingAuditService)svc)),
 
         new(
-            ps  => new SharedMailboxService(ps),
+            (ps, auth) => new SharedMailboxService(ps),
             svc => new SharedMailboxTab((ISharedMailboxService)svc)),
 
         new(
-            ps  => new GroupExplorerService(ps),
+            (ps, auth) => new GroupExplorerService(ps),
             svc => new GroupExplorerTab((IGroupExplorerService)svc)),
 
         new(
-            ps  => new TeamsExplorerService(ps),
+            (ps, auth) => new TeamsExplorerService(ps, auth),
             svc => new TeamsExplorerTab((ITeamsExplorerService)svc)),
     ];
     // ADD NEW MODULES HERE ↑ ───────────────────────────────────────────────
@@ -76,10 +77,14 @@ public static class ModuleRegistry
     /// Creates and registers all known services with the provider.
     /// Must be called once after authentication, before opening MainForm.
     /// </summary>
-    public static void RegisterAll(IAuditServiceProvider provider, PowerShellHelper powerShellHelper)
+    public static void RegisterAll(
+        IAuditServiceProvider provider,
+        PowerShellHelper powerShellHelper,
+        IAuthService authService)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(powerShellHelper);
+        ArgumentNullException.ThrowIfNull(authService);
 
         _tabFactories.Clear();
 
@@ -87,7 +92,7 @@ public static class ModuleRegistry
 
         foreach (var descriptor in _descriptors)
         {
-            var service = descriptor.ServiceFactory(powerShellHelper);
+            var service = descriptor.ServiceFactory(powerShellHelper, authService);
             provider.RegisterAudit(service);
             _tabFactories[service.ServiceId] = descriptor.TabFactory;
             AppLogger.WriteDebug($"  Registered: [{service.ServiceId}] '{service.DisplayName}' (PSModules: [{string.Join(", ", service.RequiredPowerShellModules)}])");

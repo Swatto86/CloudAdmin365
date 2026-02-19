@@ -51,8 +51,8 @@ public abstract class AuditTabBase : UserControl
         ResultsGrid = UiHelpers.CreateThemedDataGrid(gridColumns, columnWeights);
         layout.Controls.Add(ResultsGrid, 0, 2);
 
-        // Row 3: Status bar
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        // Row 3: Status bar (larger to accommodate multi-line error messages)
+        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60));
         var statusPanel = CreateStatusPanel();
         layout.Controls.Add(statusPanel, 0, 3);
 
@@ -124,10 +124,11 @@ public abstract class AuditTabBase : UserControl
         StatusLabel = new Label
         {
             Text = "Ready.",
-            Location = new Point(290, 7),
+            Location = new Point(290, 5),
             AutoSize = true,
             ForeColor = AppTheme.ThemeDimGray,
-            MaximumSize = new Size(700, 0)
+            MaximumSize = new Size(1000, 48),
+            Padding = new Padding(0, 2, 0, 2)
         };
         panel.Controls.Add(StatusLabel);
 

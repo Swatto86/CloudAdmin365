@@ -69,7 +69,7 @@ static class Program
             // Register all modules via the central ModuleRegistry.
             // To add a new module, only ModuleRegistry.cs needs to change.
             var auditProvider = new AuditServiceProvider();
-            ModuleRegistry.RegisterAll(auditProvider, powerShellHelper);
+            ModuleRegistry.RegisterAll(auditProvider, powerShellHelper, authService);
 
             // Check / install required PowerShell modules, derived from the registered services.
             var moduleAvailability = DependencyManager

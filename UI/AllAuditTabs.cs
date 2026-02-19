@@ -639,6 +639,11 @@ public class TeamsExplorerTab : AuditTabBase
             if (!string.IsNullOrEmpty(result.Error))
             {
                 UpdateStatus($"Error: {result.Error}", AppTheme.ThemeRed);
+                MessageBox.Show(
+                    result.Error,
+                    "Teams Explorer Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
                 return;
             }
 

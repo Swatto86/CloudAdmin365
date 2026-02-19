@@ -9,13 +9,13 @@ using Microsoft.Identity.Client;
 
 /// <summary>
 /// Azure AD authentication service using MSAL with interactive browser login.
-/// Uses Microsoft Office public client ID for pre-consented access to M365 services.
+/// Uses Azure CLI public client ID for pre-consented access to M365 services.
 /// </summary>
 public class AzureIdentityAuthService : IAuthService
 {
-    // Microsoft Office public client (pre-consented for Graph, Exchange, and other M365 services)
-    // This replaces the Graph-only client ID to enable token acquisition for multiple resources.
-    private const string PUBLIC_CLIENT_ID = "d3590ed6-52b3-4102-aeff-aad2292ab01c";
+    // Azure CLI public client (pre-consented for Azure, Graph, Exchange, and other M365 services)
+    // This client ID has broad pre-authorization and works without admin consent in most tenants.
+    private const string PUBLIC_CLIENT_ID = "04b07795-8ddf-4c92-b9ee-6f4e65d80b0f";
     private const string TENANT_ID = "organizations"; // Multi-tenant: any Azure AD
     private const string REDIRECT_URI = "http://localhost";
 

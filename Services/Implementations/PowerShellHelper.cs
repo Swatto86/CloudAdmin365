@@ -318,23 +318,19 @@ public sealed class PowerShellHelper : IDisposable
             throw new InvalidOperationException("PowerShell runspace not initialized.");
         }
 
-        AppLogger.WriteInfo("Connecting to Exchange Online using existing authentication...");
+        var upn = _authService.CurrentUser?.UserPrincipalName ?? "";
+        AppLogger.WriteInfo("Connecting to Exchange Online...");
 
+        // Try token-based auth first (seamless if client ID has Exchange consent)
         try
         {
-            // Get access token from existing Azure auth (reuses MSAL session)
-            // Exchange Online scope for token-based authentication
             const string ExchangeScope = "https://outlook.office365.com/.default";
             var accessToken = await _authService.GetAccessTokenAsync(ExchangeScope, cancellationToken)
                 .ConfigureAwait(false);
 
-            // Extract organization domain from UPN (e.g., "user@company.com" -> "company.com")
-            var upn = _authService.CurrentUser?.UserPrincipalName ?? "";
             var atIndex = upn.IndexOf('@');
             var organization = atIndex >= 0 ? upn.Substring(atIndex + 1) : "";
 
-            // Connect using the access token (no interactive prompt)
-            // Note: Connect-ExchangeOnline accepts -AccessToken as a plain string, unlike Connect-MgGraph
             await ExecuteInternalAsync(ps =>
             {
                 ps.AddCommand("Connect-ExchangeOnline");
@@ -347,7 +343,32 @@ public sealed class PowerShellHelper : IDisposable
             }, cancellationToken, allowReconnect: false, skipConnect: true).ConfigureAwait(false);
 
             _connected = true;
-            AppLogger.WriteInfo("Exchange Online connection established.");
+            AppLogger.WriteInfo("Exchange Online connection established via access token.");
+            return;
+        }
+        catch (Exception ex)
+        {
+            AppLogger.WriteInfo($"Token-based Exchange auth not available: {ex.Message}. Using SSO fallback...");
+        }
+
+        // Fallback: Let Exchange Online module handle its own auth with SSO hint
+        try
+        {
+            await ExecuteInternalAsync(ps =>
+            {
+                ps.AddCommand("Connect-ExchangeOnline");
+                ps.AddParameter("ShowBanner", false);
+                ps.AddParameter("SkipLoadingCmdletHelp", true);
+                ps.AddParameter("ShowProgress", false);
+                if (!string.IsNullOrWhiteSpace(upn))
+                {
+                    ps.AddParameter("UserPrincipalName", upn);
+                }
+                ps.AddParameter("ErrorAction", "Stop");
+            }, cancellationToken, allowReconnect: false, skipConnect: true).ConfigureAwait(false);
+
+            _connected = true;
+            AppLogger.WriteInfo("Exchange Online connection established via SSO.");
         }
         catch (Exception ex)
         {

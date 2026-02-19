@@ -1374,26 +1374,41 @@ public sealed class AzureADService : IAzureADService
             if (_graphConnected)
                 return;
 
-            AppLogger.WriteInfo("Connecting to Microsoft Graph using existing authentication...");
-            
-            // Get access token from existing Azure auth (reuses MSAL session)
-            var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
-                .ConfigureAwait(false);
+            AppLogger.WriteInfo("Connecting to Microsoft Graph...");
 
-            // Convert to SecureString (required by newer Microsoft.Graph module)
-            var secureToken = new System.Security.SecureString();
-            foreach (char c in accessToken)
-                secureToken.AppendChar(c);
-            secureToken.MakeReadOnly();
+            // Try token-based auth first
+            try
+            {
+                var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
+                    .ConfigureAwait(false);
 
-            // Connect using the access token (no interactive prompt)
+                var secureToken = new System.Security.SecureString();
+                foreach (char c in accessToken)
+                    secureToken.AppendChar(c);
+                secureToken.MakeReadOnly();
+
+                await _powerShell.ExecuteRawCommandAsync(
+                    "Connect-MgGraph",
+                    new Dictionary<string, object?> { ["AccessToken"] = secureToken },
+                    cancellationToken).ConfigureAwait(false);
+
+                _graphConnected = true;
+                AppLogger.WriteInfo("Microsoft Graph connection established via access token.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.WriteInfo($"Token-based Graph auth not available: {ex.Message}. Using interactive fallback...");
+            }
+
+            // Fallback: Let Microsoft.Graph module handle its own auth
             await _powerShell.ExecuteRawCommandAsync(
                 "Connect-MgGraph",
-                new Dictionary<string, object?> { ["AccessToken"] = secureToken },
+                new Dictionary<string, object?> { ["Scopes"] = new[] { "User.Read.All", "Directory.Read.All" } },
                 cancellationToken).ConfigureAwait(false);
 
             _graphConnected = true;
-            AppLogger.WriteInfo("Microsoft Graph connection established.");
+            AppLogger.WriteInfo("Microsoft Graph connection established via interactive auth.");
         }
         finally
         {
@@ -1526,26 +1541,41 @@ public sealed class IntuneService : IIntuneService
             if (_graphConnected)
                 return;
 
-            AppLogger.WriteInfo("Connecting to Microsoft Graph (Intune) using existing authentication...");
-            
-            // Get access token from existing Azure auth (reuses MSAL session)
-            var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
-                .ConfigureAwait(false);
+            AppLogger.WriteInfo("Connecting to Microsoft Graph (Intune)...");
 
-            // Convert to SecureString (required by newer Microsoft.Graph module)
-            var secureToken = new System.Security.SecureString();
-            foreach (char c in accessToken)
-                secureToken.AppendChar(c);
-            secureToken.MakeReadOnly();
+            // Try token-based auth first
+            try
+            {
+                var accessToken = await _authService.GetAccessTokenAsync(GraphScope, cancellationToken)
+                    .ConfigureAwait(false);
 
-            // Connect using the access token (no interactive prompt)
+                var secureToken = new System.Security.SecureString();
+                foreach (char c in accessToken)
+                    secureToken.AppendChar(c);
+                secureToken.MakeReadOnly();
+
+                await _powerShell.ExecuteRawCommandAsync(
+                    "Connect-MgGraph",
+                    new Dictionary<string, object?> { ["AccessToken"] = secureToken },
+                    cancellationToken).ConfigureAwait(false);
+
+                _graphConnected = true;
+                AppLogger.WriteInfo("Microsoft Graph connection (Intune) established via access token.");
+                return;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.WriteInfo($"Token-based Graph auth not available: {ex.Message}. Using interactive fallback...");
+            }
+
+            // Fallback: Let Microsoft.Graph module handle its own auth
             await _powerShell.ExecuteRawCommandAsync(
                 "Connect-MgGraph",
-                new Dictionary<string, object?> { ["AccessToken"] = secureToken },
+                new Dictionary<string, object?> { ["Scopes"] = new[] { "DeviceManagementManagedDevices.Read.All" } },
                 cancellationToken).ConfigureAwait(false);
 
             _graphConnected = true;
-            AppLogger.WriteInfo("Microsoft Graph connection (Intune) established.");
+            AppLogger.WriteInfo("Microsoft Graph connection (Intune) established via interactive auth.");
         }
         finally
         {
